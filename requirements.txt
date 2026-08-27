@@ -1,0 +1,8 @@
+pyzmq==27.2.0
+cryptography==50.0.1
+
+# Dev / CI (make lint / make test)
+pytest==9.1.1
+pytest-asyncio==1.4.0
+py-spy==0.4.2
+ruff==0.16.4
