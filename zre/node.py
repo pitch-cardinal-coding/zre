@@ -20,6 +20,7 @@ Usage:
 
 import asyncio
 import contextlib
+import fcntl
 import logging
 import select
 import socket
@@ -368,6 +369,19 @@ class ZreNode:
             return iface
         except OSError:
             pass
+        # Interface name (e.g. virbr0): resolve via ioctl SIOCGIFADDR.
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        try:
+            packed = fcntl.ioctl(
+                sock.fileno(),
+                0x8915,  # SIOCGIFADDR
+                struct.pack("256s", iface.encode()[:15]),
+            )
+            return socket.inet_ntoa(packed[20:24])
+        except OSError:
+            pass
+        finally:
+            sock.close()
         # Try to resolve via getaddrinfo / ioctl fallback: use gethostbyname
         # For iface name like eth0, try to get IP via socket ioctl would need netifaces;
         # fallback to 0.0.0.0 bind and let OS choose, but return iface for binding.
@@ -585,6 +599,28 @@ class ZreNode:
             if self._seq == 0:
                 self._seq = 1
 
+    def _interface_broadcast(self) -> str:
+        """Subnet broadcast for the pinned interface (e.g. 192.168.122.255)."""
+        if not self._interface:
+            return ""
+        ip = self._resolve_interface_ip()
+        if not ip:
+            return ""
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        try:
+            packed = fcntl.ioctl(
+                sock.fileno(),
+                0x891B,  # SIOCGIFNETMASK
+                struct.pack("256s", self._interface.encode()[:15]),
+            )
+            mask = struct.unpack("!I", packed[20:24])[0]
+        except OSError:
+            return ""
+        finally:
+            sock.close()
+        addr = struct.unpack("!I", socket.inet_aton(ip))[0]
+        return socket.inet_ntoa(struct.pack("!I", addr | (~mask & 0xFFFFFFFF)))
+
     async def _send_beacon(self, port=None):
         if port is None:
             port = self._inbox_port
@@ -593,12 +629,22 @@ class ZreNode:
         try:
             s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             s.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-            # Send to broadcast and also loopback for single-host testing
-            for target in [
+            bind_ip = self._resolve_interface_ip()
+            if bind_ip:
+                with contextlib.suppress(Exception):
+                    s.bind((bind_ip, 0))
+            # Send to the interface subnet broadcast first (reaches that
+            # NIC like upstream zbeacon), then limited broadcast and
+            # loopback for single-host testing.
+            targets = [
                 ("255.255.255.255", self._beacon_port),
                 ("127.255.255.255", self._beacon_port),
                 ("127.0.0.1", self._beacon_port),
-            ]:
+            ]
+            subnet = self._interface_broadcast()
+            if subnet:
+                targets.insert(0, (subnet, self._beacon_port))
+            for target in targets:
                 with contextlib.suppress(Exception):
                     s.sendto(beacon, target)
         except Exception as exc:
