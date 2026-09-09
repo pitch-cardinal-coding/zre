@@ -690,11 +690,25 @@ class ZreNode:
             self._peers[rhex] = peer
             self._send_hello(peer)
 
+    def _own_address_for(self, peer_addr: str) -> str:
+        """Local address the peer should dial back (sends no traffic)."""
+        ip = self._resolve_interface_ip()
+        if ip:
+            return ip
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        try:
+            sock.connect((peer_addr, self._beacon_port))
+            return sock.getsockname()[0]
+        except OSError:
+            return peer_addr
+        finally:
+            sock.close()
+
     def _send_hello(self, peer):
         self._log("SEND HELLO seq=1 to %s groups=%s", peer.uuid_hex[:8], self._own_groups)
         hdr = Codec.encode_hello(
             1,
-            f"tcp://{peer.addr}:{self._inbox_port}".encode(),
+            f"tcp://{self._own_address_for(peer.addr)}:{self._inbox_port}".encode(),
             self._own_groups,
             self._status,
             self.name,
