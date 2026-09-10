@@ -48,7 +48,10 @@ class GameClient:
         self.running = True
 
     async def start(
-        self, port: int | None = None, interface: str | None = None, verbose: bool = False
+        self,
+        port: int | None = None,
+        interface: str | None = None,
+        verbose: bool = False,
     ):
         if port:
             self.node.set_port(port)
@@ -60,7 +63,10 @@ class GameClient:
         await self.node.join(b"GAME_WORLD")
 
     async def run(
-        self, port: int | None = None, interface: str | None = None, verbose: bool = False
+        self,
+        port: int | None = None,
+        interface: str | None = None,
+        verbose: bool = False,
     ):
         await self.start(port, interface, verbose)
         print(f"[{self.player_name}] Joined game world (port {port})")
@@ -99,7 +105,9 @@ class GameClient:
             data = json.loads(payload.decode())
             other_state = PlayerState(**data)
             self.other_players[other_state.player_id] = other_state
-            print(f"[{self.player_name}] {peer_name} at ({other_state.x:.1f}, {other_state.y:.1f})")
+            print(
+                f"[{self.player_name}] {peer_name} at ({other_state.x:.1f}, {other_state.y:.1f})"
+            )
         except Exception:
             pass
 
@@ -115,7 +123,10 @@ class GameServer:
         self.players: dict[str, dict] = {}
 
     async def run(
-        self, port: int | None = None, interface: str | None = None, verbose: bool = False
+        self,
+        port: int | None = None,
+        interface: str | None = None,
+        verbose: bool = False,
     ):
         if port:
             self.node.set_port(port)

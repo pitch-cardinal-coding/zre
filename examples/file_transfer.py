@@ -77,7 +77,9 @@ async def receive_loop(node: ZreNode, output_dir: Path):
                 print(f"Transfer complete from {peer}")
 
 
-async def main_receive(output_dir: Path, port: int, interface: str | None, verbose: bool):
+async def main_receive(
+    output_dir: Path, port: int, interface: str | None, verbose: bool
+):
     node = ZreNode(f"file-xfer-{uuid.uuid4().hex[:6]}")
     if port:
         node.set_port(port)
@@ -97,7 +99,9 @@ async def main_receive(output_dir: Path, port: int, interface: str | None, verbo
         await node.stop()
 
 
-async def main_send(peer_id: str, filepath: Path, port: int, interface: str | None, verbose: bool):
+async def main_send(
+    peer_id: str, filepath: Path, port: int, interface: str | None, verbose: bool
+):
     node = ZreNode(f"file-xfer-{uuid.uuid4().hex[:6]}")
     if port:
         node.set_port(port)
@@ -115,7 +119,7 @@ async def main_send(peer_id: str, filepath: Path, port: int, interface: str | No
         await asyncio.sleep(0.2)
     await node.join(b"FILE_XFER")
     await asyncio.sleep(0.3)
-    # wait until peer is ready (check want_seq via peers)
+    # wait until peer is ready (present in peer list)
     if peer_id not in node.peers():
         print(f"Peer {peer_id[:8]} not yet discovered, waiting...")
         for _ in range(30):
@@ -153,10 +157,14 @@ def main():
     args = p.parse_args()
     try:
         if args.mode == "receive":
-            asyncio.run(main_receive(args.output_dir, args.port, args.interface, args.verbose))
+            asyncio.run(
+                main_receive(args.output_dir, args.port, args.interface, args.verbose)
+            )
         else:
             asyncio.run(
-                main_send(args.peer_id, args.filepath, args.port, args.interface, args.verbose)
+                main_send(
+                    args.peer_id, args.filepath, args.port, args.interface, args.verbose
+                )
             )
     except KeyboardInterrupt:
         print("\nInterrupted, shutting down...")

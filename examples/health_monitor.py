@@ -44,7 +44,10 @@ class HealthMonitor:
         self.all_groups: set[bytes] = {b"ALL", b"HEALTH"}
 
     async def start(
-        self, port: int | None = None, interface: str | None = None, verbose: bool = False
+        self,
+        port: int | None = None,
+        interface: str | None = None,
+        verbose: bool = False,
     ):
         if port:
             self.node.set_port(port)
@@ -106,8 +109,12 @@ class HealthMonitor:
 
     def get_cluster_health(self) -> dict:
         total = len(self.peers)
-        healthy = sum(1 for p in self.peers.values() if p.status == HealthStatus.HEALTHY)
-        evasive = sum(1 for p in self.peers.values() if p.status == HealthStatus.EVASIVE)
+        healthy = sum(
+            1 for p in self.peers.values() if p.status == HealthStatus.HEALTHY
+        )
+        evasive = sum(
+            1 for p in self.peers.values() if p.status == HealthStatus.EVASIVE
+        )
         dead = sum(1 for p in self.peers.values() if p.status == HealthStatus.DEAD)
         return {
             "total_peers": total,
@@ -118,7 +125,10 @@ class HealthMonitor:
         }
 
     async def run(
-        self, port: int | None = None, interface: str | None = None, verbose: bool = False
+        self,
+        port: int | None = None,
+        interface: str | None = None,
+        verbose: bool = False,
     ):
         await self.start(port, interface, verbose)
         print(f"[{self.node_name}] Health monitor started (port {port})")
@@ -150,7 +160,9 @@ def main():
     p.add_argument("--verbose", action="store_true")
     args = p.parse_args()
     mon = HealthMonitor(args.node_name)
-    mon.register_status_callback(lambda peer, old: asyncio.create_task(status_callback(peer, old)))
+    mon.register_status_callback(
+        lambda peer, old: asyncio.create_task(status_callback(peer, old))
+    )
     try:
         asyncio.run(mon.run(args.port, args.interface, args.verbose))
     except KeyboardInterrupt:

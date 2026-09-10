@@ -25,7 +25,9 @@ except ImportError:
 class SecureChannel:
     def __init__(self, key: bytes | None = None):
         if ChaCha20Poly1305 is None:
-            raise RuntimeError("cryptography package required: pip install cryptography")
+            raise RuntimeError(
+                "cryptography package required: pip install cryptography"
+            )
         self.key = key or os.urandom(32)
         self.cipher = ChaCha20Poly1305(self.key)
 
@@ -48,7 +50,10 @@ class SecureChatNode:
         self.channel = SecureChannel(shared_key)
 
     async def start(
-        self, port: int | None = None, interface: str | None = None, verbose: bool = False
+        self,
+        port: int | None = None,
+        interface: str | None = None,
+        verbose: bool = False,
     ):
         if port:
             self.node.set_port(port)
@@ -94,10 +99,15 @@ class SecureChatNode:
                     print(f"[{self.name}] Private decrypt failed: {exc}")
 
     async def run(
-        self, port: int | None = None, interface: str | None = None, verbose: bool = False
+        self,
+        port: int | None = None,
+        interface: str | None = None,
+        verbose: bool = False,
     ):
         await self.start(port, interface, verbose)
-        print(f"[{self.name}] Secure chat started. Type messages to send. (port {port})")
+        print(
+            f"[{self.name}] Secure chat started. Type messages to send. (port {port})"
+        )
         loop = asyncio.get_running_loop()
 
         async def event_handler():
@@ -122,7 +132,9 @@ class SecureChatNode:
                                 peer.decode(), msg.decode(errors="replace")
                             )
                     else:
-                        await self.send_encrypted(b"SECURE_CHAT", line.decode(errors="replace"))
+                        await self.send_encrypted(
+                            b"SECURE_CHAT", line.decode(errors="replace")
+                        )
 
         try:
             await asyncio.gather(self.node.run(), event_handler(), input_handler())
@@ -135,7 +147,9 @@ class SecureChatNode:
 def main():
     p = argparse.ArgumentParser(description="ZRE secure chat")
     p.add_argument("name", help="node name")
-    p.add_argument("--shared-key", type=str, default=None, help="hex-encoded 32-byte shared key")
+    p.add_argument(
+        "--shared-key", type=str, default=None, help="hex-encoded 32-byte shared key"
+    )
     p.add_argument("--port", type=int, default=5670)
     p.add_argument("--interface", type=str, default=None)
     p.add_argument("--verbose", action="store_true")

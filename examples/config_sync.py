@@ -46,7 +46,10 @@ class ConfigManager:
         self.watchers: dict[str, list] = {}
 
     async def start(
-        self, port: int | None = None, interface: str | None = None, verbose: bool = False
+        self,
+        port: int | None = None,
+        interface: str | None = None,
+        verbose: bool = False,
     ):
         if port:
             self.node.set_port(port)
@@ -117,7 +120,10 @@ class ConfigManager:
             logger.error("Config sync error: %s", exc)
 
     async def run(
-        self, port: int | None = None, interface: str | None = None, verbose: bool = False
+        self,
+        port: int | None = None,
+        interface: str | None = None,
+        verbose: bool = False,
     ):
         await self.start(port, interface, verbose)
         print(f"[{self.node_name}] Config manager started (port {port})")

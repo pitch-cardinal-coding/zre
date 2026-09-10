@@ -45,7 +45,10 @@ class DistributedLock:
         self.votes: dict[str, set[str]] = {}
 
     async def start(
-        self, port: int | None = None, interface: str | None = None, verbose: bool = False
+        self,
+        port: int | None = None,
+        interface: str | None = None,
+        verbose: bool = False,
     ):
         if port:
             self.node.set_port(port)
@@ -86,7 +89,11 @@ class DistributedLock:
             return
         self.held.discard(lock_name)
         self.locks[lock_name] = LockState.FREE
-        payload = {"type": "LOCK_RELEASE", "lock_name": lock_name, "holder_id": self.node_id}
+        payload = {
+            "type": "LOCK_RELEASE",
+            "lock_name": lock_name,
+            "holder_id": self.node_id,
+        }
         await self.node.shout(self.lock_group, json.dumps(payload).encode())
 
     async def handle_message(self, event):
@@ -115,7 +122,10 @@ class DistributedLock:
             print(f"Error handling lock message: {exc}")
 
     async def run(
-        self, port: int | None = None, interface: str | None = None, verbose: bool = False
+        self,
+        port: int | None = None,
+        interface: str | None = None,
+        verbose: bool = False,
     ):
         await self.start(port, interface, verbose)
         print(f"[{self.node_name}] Lock manager started (port {port})")
@@ -145,7 +155,9 @@ def main():
     lock = DistributedLock(args.node_name)
 
     async def demo():
-        run_task = asyncio.create_task(lock.run(args.port, args.interface, args.verbose))
+        run_task = asyncio.create_task(
+            lock.run(args.port, args.interface, args.verbose)
+        )
         await asyncio.sleep(2)
         success = await lock.acquire("resource-1", timeout=10.0)
         if success:

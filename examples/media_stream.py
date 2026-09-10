@@ -35,7 +35,9 @@ def list_media():
         print(f"{p.name:20} {p.stat().st_size / 1024 / 1024:.1f} MB")
 
 
-async def send_media(filepath: pathlib.Path, port: int, interface: str | None, verbose: bool):
+async def send_media(
+    filepath: pathlib.Path, port: int, interface: str | None, verbose: bool
+):
     if not filepath.exists():
         print(f"File not found: {filepath}")
         if DEFAULT_MEDIA_DIR.exists():
@@ -100,7 +102,9 @@ async def send_media(filepath: pathlib.Path, port: int, interface: str | None, v
     await node.stop()
 
 
-async def recv_media(out_dir: pathlib.Path, port: int, interface: str | None, verbose: bool):
+async def recv_media(
+    out_dir: pathlib.Path, port: int, interface: str | None, verbose: bool
+):
     out_dir.mkdir(parents=True, exist_ok=True)
     node = ZreNode(f"media-recv-{uuid.uuid4().hex[:4]}")
     node.set_header("X-ROLE", "media-recv")
@@ -154,7 +158,9 @@ async def recv_media(out_dir: pathlib.Path, port: int, interface: str | None, ve
                     if current_handle:
                         current_handle.close()
                         current_handle = None
-                        print(f"[recv] MEDIA_END {current_name} {received}/{expected} bytes")
+                        print(
+                            f"[recv] MEDIA_END {current_name} {received}/{expected} bytes"
+                        )
                         if received == expected:
                             print(
                                 f"[recv] saved {out_dir / current_name} — play with: mpv {out_dir / current_name}"
@@ -194,7 +200,9 @@ def main():
         default=DEFAULT_MEDIA_DIR,
         help="directory scanned by --list (default ~/Videos)",
     )
-    ps.add_argument("--list", action="store_true", help="list media files in --dir and exit")
+    ps.add_argument(
+        "--list", action="store_true", help="list media files in --dir and exit"
+    )
     ps.add_argument("--port", type=int, default=5670)
     ps.add_argument("--interface", type=str, default=None)
     ps.add_argument("--verbose", action="store_true")
@@ -208,7 +216,10 @@ def main():
         list_media()
         return
     if args.mode == "send" and not args.file:
-        print("ERROR: specify --file PATH to stream (or --list to browse --dir)", file=sys.stderr)
+        print(
+            "ERROR: specify --file PATH to stream (or --list to browse --dir)",
+            file=sys.stderr,
+        )
         sys.exit(2)
     if args.mode == "send":
         try:

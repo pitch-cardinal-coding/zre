@@ -22,7 +22,9 @@ from zre import ZreNode
 STROKE_COLORS = ["red", "green", "blue", "black", "orange"]
 
 
-async def run_board(peer_name: str, port: int, interface: str | None, verbose: bool, demo: bool):
+async def run_board(
+    peer_name: str, port: int, interface: str | None, verbose: bool, demo: bool
+):
     node = ZreNode(f"board-{peer_name}")
     node.set_header("X-ROLE", "whiteboard")
     node.set_header("X-PEER", peer_name)
@@ -87,7 +89,13 @@ async def run_board(peer_name: str, port: int, interface: str | None, verbose: b
             else:
                 print("usage: x y [color]")
                 continue
-            stroke = {"x": x, "y": y, "color": color, "peer": peer_name, "ts": time.time()}
+            stroke = {
+                "x": x,
+                "y": y,
+                "color": color,
+                "peer": peer_name,
+                "ts": time.time(),
+            }
             strokes.append(stroke)
             await node.shout(b"WHITEBOARD", json.dumps(stroke).encode())
             print(f"[you] stroke ({x},{y}) {color}")
@@ -125,10 +133,14 @@ def main():
     p.add_argument("--port", type=int, default=5670)
     p.add_argument("--interface", type=str, default=None)
     p.add_argument("--verbose", action="store_true")
-    p.add_argument("--demo", action="store_true", help="auto-generate strokes (for testing)")
+    p.add_argument(
+        "--demo", action="store_true", help="auto-generate strokes (for testing)"
+    )
     args = p.parse_args()
     try:
-        asyncio.run(run_board(args.name, args.port, args.interface, args.verbose, args.demo))
+        asyncio.run(
+            run_board(args.name, args.port, args.interface, args.verbose, args.demo)
+        )
     except KeyboardInterrupt:
         print("\nInterrupted, shutting down...")
 

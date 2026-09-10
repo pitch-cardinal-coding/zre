@@ -348,7 +348,8 @@ async def test_five_node_mesh():
     tasks = [asyncio.create_task(n.run()) for n in nodes]
     await asyncio.sleep(8)
     for n in nodes:
-        assert len(n.peers()) == 4, f"{n.name.decode()} expected 4 peers, got {len(n.peers())}"
+        got = len(n.peers())
+        assert got == 4, f"{n.name.decode()} expected 4, got {got}"
     for n in nodes:
         n._running = False
     await asyncio.sleep(0.3)
@@ -369,7 +370,8 @@ async def test_ten_node_mesh():
     tasks = [asyncio.create_task(n.run()) for n in nodes]
     await asyncio.sleep(10)
     for n in nodes:
-        assert len(n.peers()) == 9, f"{n.name.decode()} expected 9 peers, got {len(n.peers())}"
+        got = len(n.peers())
+        assert got == 9, f"{n.name.decode()} expected 9, got {got}"
     for n in nodes:
         n._running = False
     await asyncio.sleep(0.3)
@@ -440,6 +442,138 @@ async def test_shout_multiple_messages():
     shouts = await wait_event_count(n2, "SHOUT", 5, timeout=3)
     assert len(shouts) >= 5, f"Expected 5 SHOUTs, got {len(shouts)}"
     await cleanup(n1, n2, t1, t2)
+
+
+# ══════════════════════════════════════════════════════════════
+#  Interface & Beacon Tests (pinned subnets, own-address HELLO)
+# ══════════════════════════════════════════════════════════════
+
+
+class TestInterfaceResolution:
+    def test_literal_ip_passthrough(self):
+        node = ZreNode("resolve-test")
+        node.set_interface("192.168.1.50")
+        assert node._resolve_interface_ip() == "192.168.1.50"
+
+    def test_no_interface_resolves_empty(self):
+        node = ZreNode("resolve-empty")
+        assert node._resolve_interface_ip() == ""
+
+    def test_unknown_interface_resolves_empty(self):
+        node = ZreNode("resolve-unknown")
+        node.set_interface("does-not-exist-xyz")
+        assert node._resolve_interface_ip() == ""
+
+    def test_loopback_broadcast_math(self):
+        node = ZreNode("bcast-lo")
+        node.set_interface("lo")
+        assert node._resolve_interface_ip() == "127.0.0.1"
+        assert node._interface_broadcast() == "127.255.255.255"
+
+    def test_no_interface_broadcast_empty(self):
+        node = ZreNode("bcast-empty")
+        assert node._interface_broadcast() == ""
+
+    def test_set_interface_after_start_fails(self):
+        async def check():
+            node = ZreNode("iface-late")
+            await node.start()
+            try:
+                with pytest.raises(RuntimeError):
+                    node.set_interface("lo")
+            finally:
+                await node.stop()
+
+        asyncio.run(check())
+
+
+class TestOwnAddress:
+    def test_pinned_interface_wins(self):
+        node = ZreNode("own-pinned")
+        node.set_interface("127.0.0.1")
+        assert node._own_address_for("10.9.9.9") == "127.0.0.1"
+
+    def test_unpinned_uses_route_to_peer(self):
+        node = ZreNode("own-route")
+        assert node._own_address_for("127.0.0.1") == "127.0.0.1"
+
+
+class TestNodeOptions:
+    def test_set_interval_rejects_nonpositive(self):
+        node = ZreNode("interval-bad")
+        with pytest.raises(ValueError):
+            node.set_interval(0)
+        with pytest.raises(ValueError):
+            node.set_interval(-5)
+
+    def test_set_interval_accepts_ten_ms(self):
+        node = ZreNode("interval-ok")
+        node.set_interval(10)
+        assert node._beacon_interval == pytest.approx(0.01)
+
+    def test_set_port_rejects_out_of_range(self):
+        node = ZreNode("port-bad")
+        with pytest.raises(ValueError):
+            node.set_port(0)
+        with pytest.raises(ValueError):
+            node.set_port(70000)
+
+
+@pytest.mark.asyncio
+async def test_send_socket_persists_and_caches_targets():
+    """One send socket is built (start sends the first beacon) and reused."""
+    node = ZreNode("persist-test")
+    await node.start()
+    try:
+        first_sock = node._send_sock
+        assert first_sock is not None
+        first_targets = list(node._send_targets)
+        assert len(first_targets) >= 1
+        await node._send_beacon()
+        assert node._send_sock is first_sock
+        assert node._send_targets == first_targets
+    finally:
+        await node.stop()
+
+
+@pytest.mark.asyncio
+async def test_self_hello_ignored():
+    """A node never creates a peer entry for its own HELLO."""
+    node = ZreNode("self-hello")
+    await node.start()
+    try:
+        extra = {
+            "endpoint": f"tcp://127.0.0.1:{node._inbox_port}".encode(),
+            "groups": [],
+            "status": 0,
+            "name": b"self-hello",
+            "headers": {},
+        }
+        await node._handle_hello(node.peer_id_hex, extra, None)
+        assert node.peer_id_hex not in node.peers()
+        assert len(node.peers()) == 0
+    finally:
+        await node.stop()
+
+
+@pytest.mark.asyncio
+async def test_fast_tick_discovery():
+    """Two nodes discover each other at a 10ms beacon tick."""
+    n1 = ZreNode("fast1")
+    n2 = ZreNode("fast2")
+    n1.set_interval(10)
+    n2.set_interval(10)
+    await n1.start()
+    await n2.start()
+    t1 = asyncio.create_task(n1.run())
+    t2 = asyncio.create_task(n2.run())
+    try:
+        e1 = await wait_event(n1, "ENTER", timeout=10.0)
+        e2 = await wait_event(n2, "ENTER", timeout=10.0)
+        assert e1 is not None, "fast1 should see fast2 at 10ms tick"
+        assert e2 is not None, "fast2 should see fast1 at 10ms tick"
+    finally:
+        await cleanup(n1, n2, t1, t2)
 
 
 # ══════════════════════════════════════════════════════════════

@@ -96,9 +96,15 @@ async def chat_loop(name: str, port: int, interface: str | None, verbose: bool):
 
 def main():
     p = argparse.ArgumentParser(description="ZRE chat example")
-    p.add_argument("name", nargs="?", default=f"user-{uuid.uuid4().hex[:4]}", help="node name")
-    p.add_argument("--port", type=int, default=5670, help="beacon UDP port (default 5670)")
-    p.add_argument("--interface", type=str, default=None, help="network interface or IP")
+    p.add_argument(
+        "name", nargs="?", default=f"user-{uuid.uuid4().hex[:4]}", help="node name"
+    )
+    p.add_argument(
+        "--port", type=int, default=5670, help="beacon UDP port (default 5670)"
+    )
+    p.add_argument(
+        "--interface", type=str, default=None, help="network interface or IP"
+    )
     p.add_argument("--verbose", action="store_true", help="enable verbose logging")
     args = p.parse_args()
     try:

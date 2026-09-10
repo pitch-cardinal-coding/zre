@@ -70,7 +70,12 @@ async def run_coordinator(port: int, interface: str | None, verbose: bool):
                 continue
             task_id = uuid.uuid4().hex[:6]
             payload = json.dumps(
-                {"task_id": task_id, "op": "echo", "data": f"hello-{counter}", "ts": time.time()}
+                {
+                    "task_id": task_id,
+                    "op": "echo",
+                    "data": f"hello-{counter}",
+                    "ts": time.time(),
+                }
             ).encode()
             pending[task_id] = {"payload": payload}
             counter += 1

@@ -1,4 +1,4 @@
-.PHONY: lint format test test-monitor clean check-format ci help install-dev demo-chat demo-discovery demo-sensor demo-benchmark demo-all
+.PHONY: lint fix format test test-monitor clean check-format style ci help install-dev demo-chat demo-discovery demo-sensor demo-benchmark demo-all
 
 # Python and tool — use the zre venv (override via make PYTHON=... RUFF=...)
 PYTHON ?= /home/iam/devcode/.env/zre/bin/python3
@@ -11,7 +11,7 @@ SRC := zre tests examples
 # Default target — show help
 help:
 	@echo "Targets:"
-	@echo "  make lint / format / check-format / test / test-monitor / ci"
+	@echo "  make lint / fix / format / style / check-format / test / test-monitor / ci"
 	@echo "  make example-chat / example-service-discovery / example-sensor-network / example-benchmark"
 	@echo "  make demo-chat / demo-discovery / demo-sensor / demo-benchmark  (tmux isolated)"
 	@echo "  make clean / install-dev"
@@ -25,6 +25,17 @@ lint:
 format:
 	@echo "Running ruff format..."
 	$(RUFF) format $(SRC)
+
+# Fix lint issues
+fix:
+	@echo "Fixing ruff lint..."
+	$(RUFF) check --fix $(SRC)
+
+# Style: fix + format + verify
+style: fix
+	$(RUFF) format $(SRC)
+	$(RUFF) format --check $(SRC)
+	@echo "style: clean"
 
 # Check formatting without modifying
 check-format:

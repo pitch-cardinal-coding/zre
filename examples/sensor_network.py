@@ -33,7 +33,9 @@ class SensorReading:
 class SensorNode:
     """Simulates an IoT sensor publishing readings."""
 
-    def __init__(self, sensor_id: str, sensor_type: str, location: str, interval: float = 5.0):
+    def __init__(
+        self, sensor_id: str, sensor_type: str, location: str, interval: float = 5.0
+    ):
         self.sensor_id = sensor_id
         self.sensor_type = sensor_type
         self.location = location
@@ -43,7 +45,10 @@ class SensorNode:
         self.node.set_header("X-LOCATION", location)
 
     async def start(
-        self, port: int | None = None, interface: str | None = None, verbose: bool = False
+        self,
+        port: int | None = None,
+        interface: str | None = None,
+        verbose: bool = False,
     ):
         if port:
             self.node.set_port(port)
@@ -56,10 +61,15 @@ class SensorNode:
         await self.node.join(b"ALL")
 
     async def run(
-        self, port: int | None = None, interface: str | None = None, verbose: bool = False
+        self,
+        port: int | None = None,
+        interface: str | None = None,
+        verbose: bool = False,
     ):
         await self.start(port, interface, verbose)
-        print(f"[{self.sensor_id}] Started - Type: {self.sensor_type}, Location: {self.location}")
+        print(
+            f"[{self.sensor_id}] Started - Type: {self.sensor_type}, Location: {self.location}"
+        )
         # Run beacon loop in background
         run_task = asyncio.create_task(self.node.run())
         try:
@@ -116,7 +126,10 @@ class AggregatorNode:
         self.readings: dict[str, dict] = {}
 
     async def run(
-        self, port: int | None = None, interface: str | None = None, verbose: bool = False
+        self,
+        port: int | None = None,
+        interface: str | None = None,
+        verbose: bool = False,
     ):
         if port:
             self.node.set_port(port)
@@ -131,7 +144,10 @@ class AggregatorNode:
 
         async def printer():
             async for event in self.node.events():
-                if event["type"] == "SHOUT" and event.get("group") in ("SENSORS", "ALL"):
+                if event["type"] == "SHOUT" and event.get("group") in (
+                    "SENSORS",
+                    "ALL",
+                ):
                     try:
                         payload = event.get("payload", b"")
                         data = json.loads(payload.decode())
@@ -170,7 +186,9 @@ async def run_aggregator(port: int, interface: str | None, verbose: bool):
 
 def main():
     p = argparse.ArgumentParser(description="ZRE sensor network")
-    p.add_argument("mode", choices=["sensors", "aggregator"], help="run sensors or aggregator")
+    p.add_argument(
+        "mode", choices=["sensors", "aggregator"], help="run sensors or aggregator"
+    )
     p.add_argument("--port", type=int, default=5670, help="beacon port")
     p.add_argument("--interface", type=str, default=None)
     p.add_argument("--verbose", action="store_true")

@@ -22,7 +22,6 @@ import asyncio
 import contextlib
 import fcntl
 import logging
-import select
 import socket
 import struct
 import uuid as _uuid_mod
@@ -34,6 +33,9 @@ ZRE_VERSION = 2
 HELLO, WHISPER, SHOUT, JOIN, LEAVE, PING, PING_OK = range(1, 8)
 BEACON_PORT = 5670
 BEACON_SIZE = 22
+# ioctl numbers for interface address/netmask lookup (Linux, stable ABI).
+SIOCGIFADDR = 0x8915
+SIOCGIFNETMASK = 0x891B
 DEFAULT_EV_MS = 5000
 DEFAULT_EX_MS = 30000
 REAP_INTERVAL_MS = 1000
@@ -288,6 +290,8 @@ class ZreNode:
         self._ex_timeout = DEFAULT_EX_MS
         self._beacon_port = BEACON_PORT
         self._beacon_interval = 1.0
+        self._last_beacon = 0.0
+        self._beacon_msg: bytes | None = None
         # None = all interfaces, or IP / iface name
         self._interface = None
         # fixed ROUTER port if set
@@ -301,6 +305,11 @@ class ZreNode:
         self._inbox = None
         self._inbox_port = 0
         self._beacon_sock = None
+        self._beacon_fd = -1
+        # Persistent beacon send socket + cached targets (built lazily on
+        # first send, rebuilt on send failure).
+        self._send_sock = None
+        self._send_targets: list[tuple[str, int]] = []
         self._running = False
         self._event_queue: asyncio.Queue = asyncio.Queue(maxsize=1000)
         self._api_queue: asyncio.Queue = asyncio.Queue()
@@ -374,7 +383,7 @@ class ZreNode:
         try:
             packed = fcntl.ioctl(
                 sock.fileno(),
-                0x8915,  # SIOCGIFADDR
+                SIOCGIFADDR,
                 struct.pack("256s", iface.encode()[:15]),
             )
             return socket.inet_ntoa(packed[20:24])
@@ -382,10 +391,8 @@ class ZreNode:
             pass
         finally:
             sock.close()
-        # Try to resolve via getaddrinfo / ioctl fallback: use gethostbyname
-        # For iface name like eth0, try to get IP via socket ioctl would need netifaces;
-        # fallback to 0.0.0.0 bind and let OS choose, but return iface for binding.
-        # We attempt to use socket.getaddrinfo; if fails, return "" (bind all).
+        # Last resort: hostname lookup. Returns "" when unresolvable;
+        # callers treat "" as "no pin".
         try:
             return socket.gethostbyname(iface)
         except Exception:
@@ -407,16 +414,21 @@ class ZreNode:
         with contextlib.suppress(Exception):
             self._beacon_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
         self._beacon_sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-        bind_ip = self._resolve_interface_ip()
-        # Bind to beacon port on chosen interface; fallback to "" on failure
+        # Listen stays on the wildcard: on bridged/multi-homed stacks a
+        # socket bound to one unicast address gets no broadcasts at all
+        # (measured: neither limited nor subnet-directed arrive). The
+        # interface pin applies to sending only.
         try:
-            self._beacon_sock.bind((bind_ip, self._beacon_port))
-        except OSError as exc:
-            self._log(
-                "beacon bind (%s:%s) failed: %s, trying 0.0.0.0", bind_ip, self._beacon_port, exc
-            )
             self._beacon_sock.bind(("", self._beacon_port))
+        except OSError as exc:
+            self._log("beacon bind (0.0.0.0:%s) failed: %s", self._beacon_port, exc)
+            raise
         self._beacon_sock.setblocking(False)
+        self._beacon_fd = self._beacon_sock.fileno()
+        self._inbox_poller.register(self._beacon_sock, zmq.POLLIN)
+        self._beacon_msg = (
+            b"ZRE\x01" + self.peer_id + struct.pack("!H", self._inbox_port)
+        )
 
         self._running = True
         self._log(
@@ -445,7 +457,11 @@ class ZreNode:
                 self._inbox_poller.unregister(self._inbox)
             with contextlib.suppress(Exception):
                 self._beacon_sock.close()
-            self._beacon_sock = None
+        self._beacon_sock = None
+        with contextlib.suppress(Exception):
+            if self._send_sock is not None:
+                self._send_sock.close()
+            self._send_sock = None
         for s in (self._inbox,):
             if s:
                 with contextlib.suppress(Exception):
@@ -520,39 +536,54 @@ class ZreNode:
                 elif cmd[0] == "SHOUT":
                     await self._do_shout(cmd[1], cmd[2])
 
-            if now - getattr(self, "_last_beacon", 0) >= self._beacon_interval:
+            if now - self._last_beacon >= self._beacon_interval:
                 await self._send_beacon()
                 self._last_beacon = now
 
-            if self._beacon_sock is not None:
-                try:
-                    readable, _, _ = select.select([self._beacon_sock], [], [], 0)
-                    if readable:
-                        data, addr = self._beacon_sock.recvfrom(BEACON_SIZE)
-                        self._handle_beacon(data, addr)
-                except (BlockingIOError, OSError) as exc:
-                    self._log("beacon recv error: %s", exc)
-
-            if self._inbox is not None:
-                try:
-                    items = dict(self._inbox_poller.poll(0))
-                    if self._inbox in items:
+            # One wait covers both sockets: wake on traffic or when the
+            # next beacon is due (capped so commands stay responsive).
+            wait_ms = (
+                self._beacon_interval - (loop.time() - self._last_beacon)
+            ) * 1000.0
+            if wait_ms < 0.0:
+                wait_ms = 0.0
+            elif wait_ms > 5.0:
+                wait_ms = 5.0
+            try:
+                ready = self._inbox_poller.poll(wait_ms)
+            except zmq.ZMQError as exc:
+                self._log("poll error: %s", exc)
+                ready = []
+            for sock, _ev in ready:
+                if sock is self._inbox:
+                    try:
                         frames = self._inbox.recv_multipart(zmq.NOBLOCK)
-                        await self._handle_peer_msg(frames)
-                except zmq.Again:
-                    pass
-                except zmq.ZMQError as exc:
-                    self._log("inbox poll error: %s", exc)
+                    except zmq.Again:
+                        continue
+                    await self._handle_peer_msg(frames)
+                elif sock == self._beacon_fd:
+                    try:
+                        data, addr = self._beacon_sock.recvfrom(BEACON_SIZE)
+                    except (BlockingIOError, OSError):
+                        continue
+                    self._handle_beacon(data, addr)
 
             if now - last_reap >= reap_interval:
                 await self._reap(now)
                 last_reap = now
 
-            await asyncio.sleep(0.005)
+            # Yield every iteration: the loop above is fully synchronous
+            # (blocking poll + NOBLOCK receives), so without this no other
+            # task on the loop ever runs.
+            await asyncio.sleep(0)
 
         # Send EXIT beacon on shutdown
         with contextlib.suppress(Exception):
             await self._send_beacon(port=0)
+        with contextlib.suppress(Exception):
+            if self._send_sock is not None:
+                self._send_sock.close()
+            self._send_sock = None
 
     async def _join_group(self, g):
         if g in self._own_groups:
@@ -610,7 +641,7 @@ class ZreNode:
         try:
             packed = fcntl.ioctl(
                 sock.fileno(),
-                0x891B,  # SIOCGIFNETMASK
+                SIOCGIFNETMASK,
                 struct.pack("256s", self._interface.encode()[:15]),
             )
             mask = struct.unpack("!I", packed[20:24])[0]
@@ -621,38 +652,45 @@ class ZreNode:
         addr = struct.unpack("!I", socket.inet_aton(ip))[0]
         return socket.inet_ntoa(struct.pack("!I", addr | (~mask & 0xFFFFFFFF)))
 
-    async def _send_beacon(self, port=None):
-        if port is None:
-            port = self._inbox_port
-        beacon = b"ZRE\x01" + self.peer_id + struct.pack("!H", port)
-        s = None
-        try:
-            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            s.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-            bind_ip = self._resolve_interface_ip()
-            if bind_ip:
-                with contextlib.suppress(Exception):
-                    s.bind((bind_ip, 0))
-            # Send to the interface subnet broadcast first (reaches that
-            # NIC like upstream zbeacon), then limited broadcast and
-            # loopback for single-host testing.
-            targets = [
-                ("255.255.255.255", self._beacon_port),
-                ("127.255.255.255", self._beacon_port),
-                ("127.0.0.1", self._beacon_port),
-            ]
+    def _build_send_sock(self):
+        old, self._send_sock = self._send_sock, None
+        with contextlib.suppress(Exception):
+            if old is not None:
+                old.close()
+        self._send_targets = [
+            ("255.255.255.255", self._beacon_port),
+            ("127.255.255.255", self._beacon_port),
+            ("127.0.0.1", self._beacon_port),
+        ]
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+        bind_ip = self._resolve_interface_ip()
+        if bind_ip:
+            s.bind((bind_ip, 0))
             subnet = self._interface_broadcast()
             if subnet:
-                targets.insert(0, (subnet, self._beacon_port))
-            for target in targets:
+                self._send_targets = [
+                    (subnet, self._beacon_port),
+                    ("127.0.0.1", self._beacon_port),
+                ]
+        self._send_sock = s
+
+    async def _send_beacon(self, port=None):
+        if port is None:
+            beacon = self._beacon_msg
+            if beacon is None:
+                beacon = b"ZRE\x01" + self.peer_id + struct.pack("!H", self._inbox_port)
+        else:
+            beacon = b"ZRE\x01" + self.peer_id + struct.pack("!H", port)
+        try:
+            if self._send_sock is None:
+                self._build_send_sock()
+            for target in self._send_targets:
                 with contextlib.suppress(Exception):
-                    s.sendto(beacon, target)
+                    self._send_sock.sendto(beacon, target)
         except Exception as exc:
             self._log("beacon send failed: %s", exc)
-        finally:
-            if s:
-                with contextlib.suppress(Exception):
-                    s.close()
+            self._send_sock = None
 
     def _handle_beacon(self, data, addr):
         if len(data) != BEACON_SIZE or data[:3] != b"ZRE":
@@ -705,7 +743,9 @@ class ZreNode:
             sock.close()
 
     def _send_hello(self, peer):
-        self._log("SEND HELLO seq=1 to %s groups=%s", peer.uuid_hex[:8], self._own_groups)
+        self._log(
+            "SEND HELLO seq=1 to %s groups=%s", peer.uuid_hex[:8], self._own_groups
+        )
         hdr = Codec.encode_hello(
             1,
             f"tcp://{self._own_address_for(peer.addr)}:{self._inbox_port}".encode(),
@@ -744,7 +784,12 @@ class ZreNode:
         if peer is None or not peer.ready:
             return
         if peer.check_seq(cmd, seq):
-            self._log("seq mismatch %s expected %s got %s, updating", rhex[:8], peer.want_seq, seq)
+            self._log(
+                "seq mismatch %s expected %s got %s, updating",
+                rhex[:8],
+                peer.want_seq,
+                seq,
+            )
             peer.want_seq = seq
             # continue, do not drop (robust to out-of-order HELLO/JOIN)
 
@@ -813,6 +858,8 @@ class ZreNode:
             peer.refresh(now, self._ev_timeout, self._ex_timeout)
 
     async def _handle_hello(self, rhex, extra, existing):
+        if rhex == self.peer_id_hex:
+            return
         ep = extra.get("endpoint")
         if not ep:
             return
@@ -832,11 +879,10 @@ class ZreNode:
                 hp = ep_str.split("://")[1]
                 addr, port = hp.rsplit(":", 1)
                 port = int(port)
-                # If peer advertised 0.0.0.0, use beacon source addr instead
+                # A wildcard endpoint has no dialable address. This path
+                # only runs for HELLO-first peers (no beacon seen yet), so
+                # there is no source address to borrow — stay local.
                 if addr in ("0.0.0.0", "*"):
-                    # fallback to existing peer addr if known, else keep as is
-                    # We already have addr from beacon in existing case, otherwise we need to use beacon addr;
-                    # Since we are in new-peer path, we don't have beacon addr here — keep 127.0.0.1 fallback
                     addr = "127.0.0.1"
             except Exception:
                 return

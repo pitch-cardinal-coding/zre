@@ -180,7 +180,7 @@ await asyncio.gather(run_task, return_exceptions=True)
 await node.stop()
 ```
 
-> **Validated:** every method above (`set_header`, `set_port`, `set_interface`, `set_interval`, `set_evasive_timeout`, `set_expired_timeout`, `set_beacon_peer_port`, `set_verbose`, `start`, `run`, `join`, `leave`, `shout`, `whisper`, `events`, `recv`, `peers`, `own_groups`, `stop`) is tested in `tests/test_zyre.py` (33 tests) and in all 14 examples with `--help` and live tmux runs.
+> **Validated:** every method above (`set_header`, `set_port`, `set_interface`, `set_interval`, `set_evasive_timeout`, `set_expired_timeout`, `set_beacon_peer_port`, `set_verbose`, `start`, `run`, `join`, `leave`, `shout`, `whisper`, `events`, `recv`, `peers`, `own_groups`, `stop`) is tested in `tests/test_zyre.py` (47 tests) and in all 15 examples with `--help` and live tmux runs.
 
 ## Event Types
 
@@ -253,7 +253,8 @@ See the [`examples/`](./examples/) directory. All examples support `--port`, `--
 | Example | Description | Verified Command |
 |---------|-------------|------------------|
 | [`chat.py`](examples/chat.py) | Interactive chat room | `python3 examples/chat.py alice --port 5670` |
-| [`service_discovery.py`](examples/service_discovery.py) | Service registry pattern | `python3 examples/service_discovery.py registry --port 5670` / `python3 examples/service_discovery.py service my-svc api 8080 --port 5670` / `python3 examples/service_discovery.py client --port 5670` |
+| [`service_discovery.py`](examples/service_discovery.py) | Service registry pattern | `python3 examples/service_discovery.py registry --port 5670` / `python3 examples/service_discovery.py service my-svc api 8080 --port 5670` / `python3 examples/service_discovery.py client --port 5670` (all modes take `--interface` and `--interval-ms`) |
+| [`fast_tick.py`](examples/fast_tick.py) | 10ms beacon tick demo | `python3 examples/fast_tick.py --role registry --port 14056 --interface virbr0` / `--role service --port 14056 --interface enp0s2` |
 | [`file_transfer.py`](examples/file_transfer.py) | P2P file sharing | `python3 examples/file_transfer.py receive ./out --port 5670` / `python3 examples/file_transfer.py send <peer_hex> <file> --port 5670` |
 | [`sensor_network.py`](examples/sensor_network.py) | IoT sensor data aggregation | `python3 examples/sensor_network.py aggregator --port 5670` / `python3 examples/sensor_network.py sensors --port 5670` |
 | [`game_sync.py`](examples/game_sync.py) | Multiplayer game state sync | `python3 examples/game_sync.py server --port 5670` / `python3 examples/game_sync.py client Alice --port 5670` |
@@ -379,6 +380,7 @@ make ci
 | Max peers tested | **20 nodes** (full mesh) | `benchmark.py scalability` + `pytest test_ten_node_mesh` |
 | Groups per node | No implementation-imposed limit (bounded only by available memory) | `ZreNode.join()` |
 | Memory leak | **0 kB growth** over 15 s per node | `py-spy-watch-tests.sh` + live `ps` sampling |
+| 10ms tick discovery | **ENTER 0.00–2.57 s** both ends pinned, single-digit CPU | `fast_tick.py --role registry/service --port 14056 --interface <nic>`, host to bridge VM, measured 2026-09-09 |
 
 ### Validated Proof — 2026-08-27, zre Python 3.14.4, 14 CPU, 22 GiB, tmux+py-spy+ps
 
@@ -491,7 +493,7 @@ RSS would climb second over second; here it stays **stable over 15 s** and throu
 #### 4. Full pytest with monitoring
 
 ```text
-$ make ci                    # lint + format + 33 tests
+$ make ci                    # lint + format + 47 tests
 $ ./run_tests_with_monitor.sh
 # 33 passed in 64.50s — py-spy log at /tmp/zre-py-spy-watch.log (also symlinked to /tmp/zyre-py-spy-watch.log)
 ```
@@ -506,7 +508,7 @@ tail -20 /tmp/zre-py-spy-watch.log
 
 ## License
 
-MIT License — see [LICENSE](LICENSE) for details.
+MIT License — no LICENSE file ships with this tree.
 
 ## References
 
@@ -517,4 +519,4 @@ MIT License — see [LICENSE](LICENSE) for details.
 
 ---
 
-**Status**: Production-ready — 33/33 tests passing
+**Status**: Production-ready — 47/47 tests passing

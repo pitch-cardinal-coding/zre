@@ -3,10 +3,10 @@
 Performance Benchmark — Measure ZRE throughput and latency
 
 Usage:
-  python benchmark.py discovery [--nodes N] [--port PORT]
-  python benchmark.py throughput [--msgs N] [--size S] [--port PORT]
-  python benchmark.py latency [--pings N] [--port PORT]
-  python benchmark.py scalability [--port PORT]
+  python benchmark.py discovery [--nodes N] [--port PORT] [--interface IFACE]
+  python benchmark.py throughput [--msgs N] [--size S] [--port PORT] [--interface IFACE]
+  python benchmark.py latency [--pings N] [--port PORT] [--interface IFACE]
+  python benchmark.py scalability [--port PORT] [--interface IFACE]
 """
 
 import argparse
@@ -17,13 +17,20 @@ import time
 from zre import ZreNode
 
 
-async def benchmark_discovery(num_nodes: int = 10, port: int = 5670, verbose: bool = False):
+async def benchmark_discovery(
+    num_nodes: int = 10,
+    port: int = 5670,
+    verbose: bool = False,
+    interface: str | None = None,
+):
     """Benchmark peer discovery time."""
     print(f"\n=== Discovery Benchmark: {num_nodes} nodes (port {port}) ===")
 
     nodes = [ZreNode(f"bench-{i}") for i in range(num_nodes)]
     for n in nodes:
         n.set_port(port)
+        if interface:
+            n.set_interface(interface)
         if verbose:
             n.set_verbose(True)
         await n.start()
@@ -54,7 +61,10 @@ async def benchmark_discovery(num_nodes: int = 10, port: int = 5670, verbose: bo
 
 
 async def benchmark_throughput(
-    num_messages: int = 1000, payload_size: int = 1024, port: int = 5670
+    num_messages: int = 1000,
+    payload_size: int = 1024,
+    port: int = 5670,
+    interface: str | None = None,
 ):
     """Benchmark message throughput."""
     print(
@@ -65,6 +75,9 @@ async def benchmark_throughput(
     node2 = ZreNode("receiver")
     node1.set_port(port)
     node2.set_port(port)
+    if interface:
+        node1.set_interface(interface)
+        node2.set_interface(interface)
     await node1.start()
     await node2.start()
 
@@ -101,7 +114,10 @@ async def benchmark_throughput(
         elapsed = time.time() - start
 
         throughput = num_messages / elapsed if elapsed > 0 else 0
-        mbps = (num_messages * payload_size * 8) / elapsed / 1_000_000 if elapsed > 0 else 0
+        if elapsed > 0:
+            mbps = (num_messages * payload_size * 8) / elapsed / 1_000_000
+        else:
+            mbps = 0.0
 
         print(f"Sent {num_messages} messages in {elapsed:.2f}s")
         print(f"Throughput: {throughput:.0f} msg/s, {mbps:.1f} Mbps")
@@ -118,7 +134,11 @@ async def benchmark_throughput(
         await node2.stop()
 
 
-async def benchmark_latency(num_pings: int = 100, port: int = 5670):
+async def benchmark_latency(
+    num_pings: int = 100,
+    port: int = 5670,
+    interface: str | None = None,
+):
     """Benchmark message latency (whisper round-trip)."""
     print(f"\n=== Latency Benchmark: {num_pings} pings (port {port}) ===")
 
@@ -126,6 +146,9 @@ async def benchmark_latency(num_pings: int = 100, port: int = 5670):
     node2 = ZreNode("ping-receiver")
     node1.set_port(port)
     node2.set_port(port)
+    if interface:
+        node1.set_interface(interface)
+        node2.set_interface(interface)
     await node1.start()
     await node2.start()
 
@@ -181,7 +204,11 @@ async def benchmark_latency(num_pings: int = 100, port: int = 5670):
 
         valid = [v for v in latencies if v != float("inf")]
         if valid:
-            p99 = statistics.quantiles(valid, n=100)[98] if len(valid) >= 100 else max(valid)
+            p99 = (
+                statistics.quantiles(valid, n=100)[98]
+                if len(valid) >= 100
+                else max(valid)
+            )
             print(
                 f"Latency (ms): min={min(valid):.2f}, max={max(valid):.2f}, mean={statistics.mean(valid):.2f}, p50={statistics.median(valid):.2f}, p99={p99:.2f}"
             )
@@ -198,13 +225,15 @@ async def benchmark_latency(num_pings: int = 100, port: int = 5670):
         await node2.stop()
 
 
-async def benchmark_scalability(port: int = 5670):
+async def benchmark_scalability(port: int = 5670, interface: str | None = None):
     """Test scalability with increasing node counts."""
     print("\n=== Scalability Benchmark ===")
     for num_nodes in [5, 10, 15, 20]:
         print(f"\n--- Testing {num_nodes} nodes ---")
         try:
-            elapsed = await benchmark_discovery(num_nodes, port=port)
+            elapsed = await benchmark_discovery(
+                num_nodes, port=port, interface=interface
+            )
             print(f"  Discovery time: {elapsed:.2f}s")
         except Exception as exc:
             print(f"  Failed: {exc}")
@@ -213,24 +242,42 @@ async def benchmark_scalability(port: int = 5670):
 
 def main():
     p = argparse.ArgumentParser(description="ZRE benchmark")
-    p.add_argument("benchmark", choices=["discovery", "throughput", "latency", "scalability"])
+    p.add_argument(
+        "benchmark", choices=["discovery", "throughput", "latency", "scalability"]
+    )
     p.add_argument("--nodes", type=int, default=10, help="num nodes for discovery")
     p.add_argument("--msgs", type=int, default=1000, help="num msgs for throughput")
     p.add_argument("--size", type=int, default=1024, help="payload size")
     p.add_argument("--pings", type=int, default=100, help="num pings for latency")
     p.add_argument("--port", type=int, default=5670, help="beacon port")
+    p.add_argument(
+        "--interface", type=str, default=None, help="pin beacons to this interface"
+    )
     p.add_argument("--verbose", action="store_true")
     args = p.parse_args()
 
     try:
         if args.benchmark == "discovery":
-            asyncio.run(benchmark_discovery(args.nodes, port=args.port, verbose=args.verbose))
+            asyncio.run(
+                benchmark_discovery(
+                    args.nodes,
+                    port=args.port,
+                    verbose=args.verbose,
+                    interface=args.interface,
+                )
+            )
         elif args.benchmark == "throughput":
-            asyncio.run(benchmark_throughput(args.msgs, args.size, port=args.port))
+            asyncio.run(
+                benchmark_throughput(
+                    args.msgs, args.size, port=args.port, interface=args.interface
+                )
+            )
         elif args.benchmark == "latency":
-            asyncio.run(benchmark_latency(args.pings, port=args.port))
+            asyncio.run(
+                benchmark_latency(args.pings, port=args.port, interface=args.interface)
+            )
         elif args.benchmark == "scalability":
-            asyncio.run(benchmark_scalability(port=args.port))
+            asyncio.run(benchmark_scalability(port=args.port, interface=args.interface))
     except KeyboardInterrupt:
         print("\nInterrupted, shutting down...")
 
