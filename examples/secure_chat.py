@@ -87,7 +87,10 @@ class SecureChatNode:
                     dec = self.channel.decrypt(enc).decode()
                     print(f"[{self.name}] {dec}")
                 except Exception as exc:
-                    print(f"[{self.name}] Decrypt failed from {peer}: {exc}")
+                    print(
+                        f"[{self.name}] Decrypt failed from {peer}: {exc} "
+                        "(both ends need the same --shared-key)"
+                    )
         elif t == "WHISPER":
             payload = event.get("payload", b"")
             if payload.startswith(b"ENCRYPTED:"):
@@ -96,7 +99,10 @@ class SecureChatNode:
                     dec = self.channel.decrypt(enc).decode()
                     print(f"[{self.name}] (private) {dec}")
                 except Exception as exc:
-                    print(f"[{self.name}] Private decrypt failed: {exc}")
+                    print(
+                        f"[{self.name}] Private decrypt failed: {exc} "
+                        "(both ends need the same --shared-key)"
+                    )
 
     async def run(
         self,
@@ -150,7 +156,7 @@ def main():
     p.add_argument(
         "--shared-key", type=str, default=None, help="hex-encoded 32-byte shared key"
     )
-    p.add_argument("--port", type=int, default=5670)
+    p.add_argument("--port", type=int, default=15670)
     p.add_argument("--interface", type=str, default=None)
     p.add_argument("--verbose", action="store_true")
     args = p.parse_args()

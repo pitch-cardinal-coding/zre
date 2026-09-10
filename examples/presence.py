@@ -6,8 +6,8 @@ Prints ENTER/EXIT/EVASIVE and maintains a live peer table.
 Simplest example for Local Network / IoT / Event venues.
 
 Usage:
-  python3 examples/presence.py alice --port 5670
-  python3 examples/presence.py bob --port 5670 --verbose
+  python3 examples/presence.py alice --port 15670
+  python3 examples/presence.py bob --port 15670 --verbose
 """
 
 import argparse
@@ -82,7 +82,7 @@ async def run_presence(name: str, port: int, interface: str | None, verbose: boo
 def main():
     p = argparse.ArgumentParser(description="ZRE presence")
     p.add_argument("name", help="peer name")
-    p.add_argument("--port", type=int, default=5670)
+    p.add_argument("--port", type=int, default=15670)
     p.add_argument("--interface", type=str, default=None)
     p.add_argument("--verbose", action="store_true")
     args = p.parse_args()

@@ -189,7 +189,7 @@ def main():
     p.add_argument(
         "mode", choices=["sensors", "aggregator"], help="run sensors or aggregator"
     )
-    p.add_argument("--port", type=int, default=5670, help="beacon port")
+    p.add_argument("--port", type=int, default=15670, help="beacon port")
     p.add_argument("--interface", type=str, default=None)
     p.add_argument("--verbose", action="store_true")
     args = p.parse_args()

@@ -3,9 +3,9 @@
 Interactive Chat Room — Classic ZRE Example
 
 Run multiple instances:
-  python chat.py alice --port 5670
-  python chat.py bob --port 5670
-  python chat.py charlie --port 5670
+  python chat.py alice --port 15670
+  python chat.py bob --port 15670
+  python chat.py charlie --port 15670
 
 All instances on the same LAN will discover each other automatically.
 Commands: type message + Enter to SHOUT, /w <peer_hex> <msg> to whisper.
@@ -100,7 +100,7 @@ def main():
         "name", nargs="?", default=f"user-{uuid.uuid4().hex[:4]}", help="node name"
     )
     p.add_argument(
-        "--port", type=int, default=5670, help="beacon UDP port (default 5670)"
+        "--port", type=int, default=15670, help="beacon UDP port (default 15670)"
     )
     p.add_argument(
         "--interface", type=str, default=None, help="network interface or IP"

@@ -7,7 +7,7 @@
 | Feature | Description |
 |---------|-------------|
 | **Zero-configuration** | No central servers, brokers, or admin |
-| **Peer discovery** | Automatic via UDP broadcast beacons (port 5670) |
+| **Peer discovery** | Automatic via UDP broadcast beacons (port 15670) |
 | **Group messaging** | Join/leave named groups, multicast via unicast |
 | **Direct messaging** | Whisper to individual peers |
 | **Heartbeating** | Automatic detection of peers going evasive, silent, or dead |
@@ -47,7 +47,7 @@ $PYTHON -m pip install -e .[secure]  # cryptography for secure_chat
 | `mpv` / `vlc` | `examples/media_stream.py` playback (optional) | `which mpv && mpv --version` | `sudo apt update && sudo apt install -y mpv` | `media_stream.py` saves to `--out`; play after with `mpv ./media_out/<file>.mp4` |
 | `ffmpeg` / `ffprobe` | re-mux for **true live** fragmented mp4, and file validation | `which ffmpeg && ffmpeg -version; which ffprobe && ffprobe -version` | `sudo apt install -y ffmpeg` | `media_stream.py` still works for `~/Videos/` mp4s (non-fragmented → `mpv` buffers until `MEDIA_END` then plays). For incremental live, re-mux: `ffmpeg -i input.mp4 -movflags frag_keyframe+empty_moov -c copy frag.mp4` — then `mpv` plays chunk-by-chunk as they arrive. |
 | `py-spy` | `py-spy-watch-tests.sh` / `run_tests_with_monitor.sh` RSS + stack dumps | `which py-spy || ls ~/.cargo/bin/py-spy` | `cargo install py-spy` or `pip install py-spy` (needs `sudo` for `dump` — without it we still log RSS) | Watcher prints `WARN: passwordless sudo unavailable — logging RSS only (dumps skipped)` and continues with `ps` RSS only |
-| `tmux` | `make demo-*` isolated panes, live `ps` validation | `which tmux && tmux -V` | `sudo apt install -y tmux` | You can still run examples directly: `python3 examples/chat.py alice --port 5670` in two terminals |
+| `tmux` | `make demo-*` isolated panes, live `ps` validation | `which tmux && tmux -V` | `sudo apt install -y tmux` | You can still run examples directly: `python3 examples/chat.py alice --port 15670` in two terminals |
 | `~/Videos/` | `file_transfer.py` / `media_stream.py` demo media | `ls ~/Videos/ \| head` | Not required — any file works. Pass it via `--file` (send) or `receive <dir>`. If `--dir`/`--file` is missing, the tools print `File not found`. | Falls back to any `pathlib.Path` you pass |
 | `zre` venv | **all** commands | `ls .venv/bin/python3 && .venv/bin/python3 --version` | `python3 -m venv .venv && .venv/bin/python3 -m pip install -r requirements.txt && .venv/bin/python3 -m pip install -e .` | A virtualenv is required so `from zre import ZreNode` resolves; `pip install -e .` with `editable_mode=compat` is recommended (see `zre` venv notes) |
 
@@ -62,7 +62,7 @@ from zre import ZreNode
 
 async def main():
     node = ZreNode("my-app")
-    node.set_port(5670)  # override beacon port to isolate clusters
+    node.set_port(15670)  # override beacon port to isolate clusters
     await node.start()
     await node.join("CHAT")
 
@@ -125,18 +125,18 @@ asyncio.run(main())
 
 | Scenario | Example | Command | What it proves |
 |----------|---------|---------|----------------|
-| Local chat, event venues, offline-first | `chat.py` | `python3 examples/chat.py alice --port 5670` | SHOUT + WHISPER + ENTER/EXIT |
-| Service discovery, clustering, service mesh | `service_discovery.py` | `python3 examples/service_discovery.py registry --port 5670` | X-ROLE headers + ENTER |
-| IoT sensor data | `sensor_network.py` | `python3 examples/sensor_network.py aggregator --port 5670` | SHOUT to SENSORS group, JSON payloads |
-| P2P file share, media streaming | `file_transfer.py`, `media_stream.py` | `python3 examples/file_transfer.py send <peer> ~/Videos/sample.mp4 --port 5670` / `python3 examples/media_stream.py send --file ~/Videos/sample.mp4 --port 5670` | WHISPER 64 KiB + SHOUT broadcast, 19 mp4s hash-verified |
-| Distributed task queues | `task_queue.py` | `python3 examples/task_queue.py coordinator --port 5670` / `worker w1 --port 5670` | SHOUT tasks + WHISPER results, 5 tasks validated |
-| Real-time whiteboard | `whiteboard.py` | `python3 examples/whiteboard.py alice --port 5670 --demo` | SHOUT JSON strokes, 3 peers validated |
-| Presence, smart home | `presence.py` | `python3 examples/presence.py alice --port 5670` | ENTER/EXIT/EVASIVE table, no group needed |
-| Multiplayer game | `game_sync.py` | `python3 examples/game_sync.py server --port 5670` | 20 Hz SHOUT state sync |
-| Config sync | `config_sync.py` | `python3 examples/config_sync.py node-1 --port 5670` | SHOUT + version vectors |
-| Health monitoring | `health_monitor.py` | `python3 examples/health_monitor.py monitor --port 5670` | EVASIVE/EXIT tracking |
-| Distributed lock | `distributed_lock.py` | `python3 examples/distributed_lock.py node-1 --port 5670` | SHOUT + WHISPER grant |
-| Encrypted chat | `secure_chat.py` | `python3 examples/secure_chat.py alice --port 5670` | ChaCha20 via cryptography |
+| Local chat, event venues, offline-first | `chat.py` | `python3 examples/chat.py alice --port 15670` | SHOUT + WHISPER + ENTER/EXIT |
+| Service discovery, clustering, service mesh | `service_discovery.py` | `python3 examples/service_discovery.py registry --port 15670` | X-ROLE headers + ENTER |
+| IoT sensor data | `sensor_network.py` | `python3 examples/sensor_network.py aggregator --port 15670` | SHOUT to SENSORS group, JSON payloads |
+| P2P file share, media streaming | `file_transfer.py`, `media_stream.py` | `python3 examples/file_transfer.py send <peer> ~/Videos/sample.mp4 --port 15670` / `python3 examples/media_stream.py send --file ~/Videos/sample.mp4 --port 15670` | WHISPER 64 KiB + SHOUT broadcast, 19 mp4s hash-verified |
+| Distributed task queues | `task_queue.py` | `python3 examples/task_queue.py coordinator --port 15670` / `worker w1 --port 15670` | SHOUT tasks + WHISPER results, 5 tasks validated |
+| Real-time whiteboard | `whiteboard.py` | `python3 examples/whiteboard.py alice --port 15670 --demo` | SHOUT JSON strokes, 3 peers validated |
+| Presence, smart home | `presence.py` | `python3 examples/presence.py alice --port 15670` | ENTER/EXIT/EVASIVE table, no group needed |
+| Multiplayer game | `game_sync.py` | `python3 examples/game_sync.py server --port 15670` | 20 Hz SHOUT state sync |
+| Config sync | `config_sync.py` | `python3 examples/config_sync.py node-1 --port 15670` | SHOUT + version vectors |
+| Health monitoring | `health_monitor.py` | `python3 examples/health_monitor.py monitor --port 15670` | EVASIVE/EXIT tracking |
+| Distributed lock | `distributed_lock.py` | `python3 examples/distributed_lock.py node-1 --port 15670` | SHOUT + WHISPER grant |
+| Encrypted chat | `secure_chat.py` | `python3 examples/secure_chat.py alice --port 15670` | ChaCha20 via cryptography |
 | Benchmark & scale | `benchmark.py` | `python3 examples/benchmark.py scalability --port 5840` | 20-node mesh 0.20s (see Performance) |
 
 ## API Overview
@@ -153,7 +153,7 @@ node.set_header("X-ROLE", "worker")
 node.set_header("X-VERSION", "1.0")
 
 # All config before start (see Configuration)
-node.set_port(5670)
+node.set_port(15670)
 
 await node.start()
 
@@ -204,7 +204,7 @@ node = ZreNode("my-node")
 # Network interface (if multiple NICs)
 node.set_interface("eth0")  # or "192.168.1.100"
 
-# UDP beacon port (default: 5670)
+# UDP beacon port (default: 15670)
 node.set_port(5671)  # different port for separate clusters
 
 # Beacon interval (default: 1000ms)
@@ -231,7 +231,7 @@ node.set_verbose()
 │  │  UDP     │  │  ROUTER  │  │  API     │                  │
 │  │  Beacon  │  │  Socket  │  │  Queue   │                  │
 │  │  (port   │  │  (TCP    │  │  (join/  │                  │
-│  │  5670)   │  │  ephemeral)│  │  leave)  │                  │
+│  │  15670)   │  │  ephemeral)│  │  leave)  │                  │
 │  └────┬─────┘  └────┬─────┘  └────┬─────┘                  │
 │       │             │             │                         │
 │       ▼             ▼             ▼                         │
@@ -252,23 +252,23 @@ See the [`examples/`](./examples/) directory. All examples support `--port`, `--
 
 | Example | Description | Verified Command |
 |---------|-------------|------------------|
-| [`chat.py`](examples/chat.py) | Interactive chat room | `python3 examples/chat.py alice --port 5670` |
-| [`service_discovery.py`](examples/service_discovery.py) | Service registry pattern | `python3 examples/service_discovery.py registry --port 5670` / `python3 examples/service_discovery.py service my-svc api 8080 --port 5670` / `python3 examples/service_discovery.py client --port 5670` (all modes take `--interface` and `--interval-ms`) |
+| [`chat.py`](examples/chat.py) | Interactive chat room | `python3 examples/chat.py alice --port 15670` |
+| [`service_discovery.py`](examples/service_discovery.py) | Service registry pattern | `python3 examples/service_discovery.py registry --port 15670` / `python3 examples/service_discovery.py service my-svc api 8080 --port 15670` / `python3 examples/service_discovery.py client --port 15670` (all modes take `--interface` and `--interval-ms`) |
 | [`fast_tick.py`](examples/fast_tick.py) | 10ms beacon tick demo | `python3 examples/fast_tick.py --role registry --port 14056 --interface virbr0` / `--role service --port 14056 --interface enp0s2` |
-| [`file_transfer.py`](examples/file_transfer.py) | P2P file sharing | `python3 examples/file_transfer.py receive ./out --port 5670` / `python3 examples/file_transfer.py send <peer_hex> <file> --port 5670` |
-| [`sensor_network.py`](examples/sensor_network.py) | IoT sensor data aggregation | `python3 examples/sensor_network.py aggregator --port 5670` / `python3 examples/sensor_network.py sensors --port 5670` |
-| [`game_sync.py`](examples/game_sync.py) | Multiplayer game state sync | `python3 examples/game_sync.py server --port 5670` / `python3 examples/game_sync.py client Alice --port 5670` |
-| [`distributed_lock.py`](examples/distributed_lock.py) | Distributed locking | `python3 examples/distributed_lock.py node-1 --port 5670` |
-| [`config_sync.py`](examples/config_sync.py) | Distributed config propagation | `python3 examples/config_sync.py node-1 --port 5670` |
-| [`health_monitor.py`](examples/health_monitor.py) | Peer health monitoring | `python3 examples/health_monitor.py monitor-1 --port 5670` |
-| [`secure_chat.py`](examples/secure_chat.py) | Encrypted messaging | `python3 examples/secure_chat.py alice --port 5670` (requires `cryptography`) |
-| [`benchmark.py`](examples/benchmark.py) | Performance benchmarking | `python3 examples/benchmark.py discovery --nodes 5 --port 5670` |
-| [`task_queue.py`](examples/task_queue.py) | Distributed task queue | `python3 examples/task_queue.py coordinator --port 5670` / `worker w1 --port 5670` |
-| [`whiteboard.py`](examples/whiteboard.py) | Collaborative whiteboard | `python3 examples/whiteboard.py alice --port 5670 --demo` |
-| [`presence.py`](examples/presence.py) | Presence tracker | `python3 examples/presence.py alice --port 5670` |
-| [`media_stream.py`](examples/media_stream.py) | Media streaming | `python3 examples/media_stream.py send --file ./sample.mp4 --port 5670` / `recv --out ./media_out --port 5670` |
+| [`file_transfer.py`](examples/file_transfer.py) | P2P file sharing | `python3 examples/file_transfer.py receive ./out --port 15670` / `python3 examples/file_transfer.py send <peer_hex> <file> --port 15670` |
+| [`sensor_network.py`](examples/sensor_network.py) | IoT sensor data aggregation | `python3 examples/sensor_network.py aggregator --port 15670` / `python3 examples/sensor_network.py sensors --port 15670` |
+| [`game_sync.py`](examples/game_sync.py) | Multiplayer game state sync | `python3 examples/game_sync.py server --port 15670` / `python3 examples/game_sync.py client Alice --port 15670` |
+| [`distributed_lock.py`](examples/distributed_lock.py) | Distributed locking | `python3 examples/distributed_lock.py node-1 --port 15670` |
+| [`config_sync.py`](examples/config_sync.py) | Distributed config propagation | `python3 examples/config_sync.py node-1 --port 15670` |
+| [`health_monitor.py`](examples/health_monitor.py) | Peer health monitoring | `python3 examples/health_monitor.py monitor-1 --port 15670` |
+| [`secure_chat.py`](examples/secure_chat.py) | Encrypted messaging | `python3 examples/secure_chat.py alice --port 15670` (requires `cryptography`) |
+| [`benchmark.py`](examples/benchmark.py) | Performance benchmarking | `python3 examples/benchmark.py discovery --nodes 5 --port 15670` |
+| [`task_queue.py`](examples/task_queue.py) | Distributed task queue | `python3 examples/task_queue.py coordinator --port 15670` / `worker w1 --port 15670` |
+| [`whiteboard.py`](examples/whiteboard.py) | Collaborative whiteboard | `python3 examples/whiteboard.py alice --port 15670 --demo` |
+| [`presence.py`](examples/presence.py) | Presence tracker | `python3 examples/presence.py alice --port 15670` |
+| [`media_stream.py`](examples/media_stream.py) | Media streaming | `python3 examples/media_stream.py send --file ./sample.mp4 --port 15670` / `recv --out ./media_out --port 15670` |
 
-Each example validates args via `argparse` and prints `--help` on error. Use `--port` to isolate clusters (e.g., 5671 for tests, 5670 for demos).
+Each example validates args via `argparse` and prints `--help` on error. Use `--port` to isolate clusters (e.g., 5671 for tests, 15670 for demos).
 
 ## Monitoring & Debugging
 
@@ -288,6 +288,11 @@ make lint          # ruff check zre tests examples
 make check-format  # ruff format --check
 make format        # ruff format
 make ci            # check-format + lint + test
+
+# Memory profiling with memray (airbits venv carries it)
+PYTHONPATH=zre /home/iam/devcode/.env/airbits/bin/python3 -m memray run -o /tmp/zre-mem.bin examples/service_discovery.py registry --port 15670
+/home/iam/devcode/.env/airbits/bin/python3 -m memray summary /tmp/zre-mem.bin
+/home/iam/devcode/.env/airbits/bin/python3 -m memray stats /tmp/zre-mem.bin
 ```
 
 ### Tmux-Isolated Demos
@@ -305,13 +310,13 @@ make demo-sensor
 make demo-benchmark
 
 # Manual tmux (equivalent):
-tmux new-session -d -s zre-demo-chat "python3 examples/chat.py alice --port 5670"
-tmux split-window -h -t zre-demo-chat "python3 examples/chat.py bob --port 5670"
-tmux split-window -v -t zre-demo-chat:0.1 "python3 examples/chat.py charlie --port 5670"
+tmux new-session -d -s zre-demo-chat "python3 examples/chat.py alice --port 15670"
+tmux split-window -h -t zre-demo-chat "python3 examples/chat.py bob --port 15670"
+tmux split-window -v -t zre-demo-chat:0.1 "python3 examples/chat.py charlie --port 15670"
 tmux attach -t zre-demo-chat  # detach with Ctrl-b d, kill with tmux kill-session -t zre-demo-chat
 
 # Guide for any example:
-# 1. Pick a beacon port (5670 default, 5671 for isolated test)
+# 1. Pick a beacon port (15670 default, 5671 for isolated test)
 # 2. Start peers in separate panes: python3 examples/<ex> <args> --port <port>
 # 3. Observe ENTER/JOIN/SHOUT/WHISPER/EXIT events
 ```
@@ -409,7 +414,7 @@ $ python3 examples/benchmark.py scalability --port 5840
 --- Testing 20 nodes — 0.20s
 ```
 
-*Why it matters:* ZRE uses UDP beacons (port 5670 by default, `--port` isolates clusters). All peers
+*Why it matters:* ZRE uses UDP beacons (port 15670 by default, `--port` isolates clusters). All peers
 hear each other in < 200 ms even at 20-node mesh — no central registry.
 
 > **Throughput Context**

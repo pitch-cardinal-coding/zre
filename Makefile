@@ -12,7 +12,7 @@ SRC := zre tests examples
 help:
 	@echo "Targets:"
 	@echo "  make lint / fix / format / style / check-format / test / test-monitor / ci"
-	@echo "  make example-chat / example-service-discovery / example-sensor-network / example-benchmark"
+	@echo "  make example-chat / example-service-discovery / example-sensor-network / example-benchmark / example-fast-tick"
 	@echo "  make demo-chat / demo-discovery / demo-sensor / demo-benchmark  (tmux isolated)"
 	@echo "  make clean / install-dev"
 
@@ -85,13 +85,16 @@ example-sensor-network:
 example-benchmark:
 	$(PYTHON) examples/benchmark.py --help
 
+example-fast-tick:
+	$(PYTHON) examples/fast_tick.py --help
+
 # Tmux-isolated demos — each spawns server+client in split panes
 demo-chat:
 	@echo "Starting tmux demo-chat (server + 2 clients)..."
 	$(TMUX) kill-session -t $(DEMO_PREFIX)-chat 2>/dev/null || true
-	$(TMUX) new-session -d -s $(DEMO_PREFIX)-chat "$(PYTHON) examples/chat.py alice --port 5670; echo '--- alice done ---'; read"
-	$(TMUX) split-window -h -t $(DEMO_PREFIX)-chat "$(PYTHON) examples/chat.py bob --port 5670; echo '--- bob done ---'; read"
-	$(TMUX) split-window -v -t $(DEMO_PREFIX)-chat:0.1 "$(PYTHON) examples/chat.py charlie --port 5670; echo '--- charlie done ---'; read"
+	$(TMUX) new-session -d -s $(DEMO_PREFIX)-chat "$(PYTHON) examples/chat.py alice --port 15670; echo '--- alice done ---'; read"
+	$(TMUX) split-window -h -t $(DEMO_PREFIX)-chat "$(PYTHON) examples/chat.py bob --port 15670; echo '--- bob done ---'; read"
+	$(TMUX) split-window -v -t $(DEMO_PREFIX)-chat:0.1 "$(PYTHON) examples/chat.py charlie --port 15670; echo '--- charlie done ---'; read"
 	$(TMUX) select-layout -t $(DEMO_PREFIX)-chat tiled
 	@echo "Attached to tmux session $(DEMO_PREFIX)-chat — detach with Ctrl-b d, kill with tmux kill-session -t $(DEMO_PREFIX)-chat"
 	$(TMUX) attach -t $(DEMO_PREFIX)-chat || true
@@ -99,20 +102,20 @@ demo-chat:
 demo-discovery:
 	@echo "Starting tmux service-discovery demo..."
 	$(TMUX) kill-session -t $(DEMO_PREFIX)-discovery 2>/dev/null || true
-	$(TMUX) new-session -d -s $(DEMO_PREFIX)-discovery "$(PYTHON) examples/service_discovery.py registry --port 5670; read"
-	$(TMUX) split-window -h -t $(DEMO_PREFIX)-discovery "$(PYTHON) examples/service_discovery.py service my-svc api 8080 --port 5670; read"
-	$(TMUX) split-window -h -t $(DEMO_PREFIX)-discovery "$(PYTHON) examples/service_discovery.py client --port 5670; read"
+	$(TMUX) new-session -d -s $(DEMO_PREFIX)-discovery "$(PYTHON) examples/service_discovery.py registry --port 15670; read"
+	$(TMUX) split-window -h -t $(DEMO_PREFIX)-discovery "$(PYTHON) examples/service_discovery.py service my-svc api 8080 --port 15670; read"
+	$(TMUX) split-window -h -t $(DEMO_PREFIX)-discovery "$(PYTHON) examples/service_discovery.py client --port 15670; read"
 	$(TMUX) select-layout -t $(DEMO_PREFIX)-discovery even-horizontal
 	$(TMUX) attach -t $(DEMO_PREFIX)-discovery || true
 
 demo-sensor:
 	@echo "Starting tmux sensor demo (aggregator + sensors)..."
 	$(TMUX) kill-session -t $(DEMO_PREFIX)-sensor 2>/dev/null || true
-	$(TMUX) new-session -d -s $(DEMO_PREFIX)-sensor "$(PYTHON) examples/sensor_network.py aggregator --port 5670; read"
-	$(TMUX) split-window -h -t $(DEMO_PREFIX)-sensor "$(PYTHON) examples/sensor_network.py sensors --port 5670; read"
+	$(TMUX) new-session -d -s $(DEMO_PREFIX)-sensor "$(PYTHON) examples/sensor_network.py aggregator --port 15670; read"
+	$(TMUX) split-window -h -t $(DEMO_PREFIX)-sensor "$(PYTHON) examples/sensor_network.py sensors --port 15670; read"
 	$(TMUX) attach -t $(DEMO_PREFIX)-sensor || true
 
 demo-benchmark:
-	$(PYTHON) examples/benchmark.py discovery --nodes 5 --port 5670
+	$(PYTHON) examples/benchmark.py discovery --nodes 5 --port 15670
 
 demo-all: demo-chat

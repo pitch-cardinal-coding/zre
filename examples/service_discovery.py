@@ -91,13 +91,24 @@ async def run_service(
         node.set_verbose(True)
     await node.start()
     await node.join(b"SERVICES")
-    await node.shout(b"SERVICES", f"{service_name}:{service_type}:{svc_port}".encode())
+    announcement = f"{service_name}:{service_type}:{svc_port}".encode()
+    await node.shout(b"SERVICES", announcement)
 
     print(
         f"[{service_name}] Service started on port {svc_port} — registered as {service_type}"
     )
+
+    async def announce():
+        # Repeat: a single startup shout races peer discovery and lands
+        # nowhere when nobody has joined yet.
+        while True:
+            await asyncio.sleep(5)
+            await node.shout(b"SERVICES", announcement)
+
     try:
-        await node.run()
+        await asyncio.gather(node.run(), announce())
+    except (asyncio.CancelledError, KeyboardInterrupt):
+        pass
     finally:
         await node.stop()
 
@@ -143,7 +154,7 @@ def main():
     sub = p.add_subparsers(dest="mode", required=True)
 
     pr = sub.add_parser("registry", help="run registry")
-    pr.add_argument("--port", type=int, default=5670)
+    pr.add_argument("--port", type=int, default=15670)
     pr.add_argument("--interface", type=str, default=None)
     pr.add_argument("--interval-ms", type=int, default=1000)
     pr.add_argument("--verbose", action="store_true")
@@ -152,13 +163,13 @@ def main():
     ps.add_argument("name", help="service name")
     ps.add_argument("type", help="service type")
     ps.add_argument("svc_port", type=int, help="service port")
-    ps.add_argument("--port", type=int, default=5670)
+    ps.add_argument("--port", type=int, default=15670)
     ps.add_argument("--interface", type=str, default=None)
     ps.add_argument("--interval-ms", type=int, default=1000)
     ps.add_argument("--verbose", action="store_true")
 
     pc = sub.add_parser("client", help="run client")
-    pc.add_argument("--port", type=int, default=5670)
+    pc.add_argument("--port", type=int, default=15670)
     pc.add_argument("--interface", type=str, default=None)
     pc.add_argument("--interval-ms", type=int, default=1000)
     pc.add_argument("--verbose", action="store_true")

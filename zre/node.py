@@ -31,7 +31,7 @@ import zmq
 ZRE_SIGNATURE = 0xAAA0 | 1  # 0xAAA1 on wire, per RFC 36
 ZRE_VERSION = 2
 HELLO, WHISPER, SHOUT, JOIN, LEAVE, PING, PING_OK = range(1, 8)
-BEACON_PORT = 5670
+BEACON_PORT = 15670
 BEACON_SIZE = 22
 # ioctl numbers for interface address/netmask lookup (Linux, stable ABI).
 SIOCGIFADDR = 0x8915
@@ -326,7 +326,7 @@ class ZreNode:
         self._interface = iface
 
     def set_port(self, port: int):
-        """Set UDP beacon port (default 5670). Use different port to isolate clusters."""
+        """Set UDP beacon port (default 15670). Use different port to isolate clusters."""
         self._ensure_not_running("set_port")
         if not 1 <= port <= 65535:
             raise ValueError("port must be 1-65535")

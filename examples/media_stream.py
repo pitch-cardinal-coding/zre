@@ -6,10 +6,10 @@ Streams an mp4 to all peers in group MEDIA. Receiver saves chunks and can
 play with mpv/vlc. Any local .mp4 works — pass it with --file.
 
 Usage:
-  python3 examples/media_stream.py send --file ./sample.mp4 --port 5670
+  python3 examples/media_stream.py send --file ./sample.mp4 --port 15670
   python3 examples/media_stream.py send --list
   # list .mp4 files in --dir
-  python3 examples/media_stream.py recv --out ./media_out --port 5670
+  python3 examples/media_stream.py recv --out ./media_out --port 15670
 """
 
 import argparse
@@ -203,12 +203,12 @@ def main():
     ps.add_argument(
         "--list", action="store_true", help="list media files in --dir and exit"
     )
-    ps.add_argument("--port", type=int, default=5670)
+    ps.add_argument("--port", type=int, default=15670)
     ps.add_argument("--interface", type=str, default=None)
     ps.add_argument("--verbose", action="store_true")
     pr = sub.add_parser("recv", help="receive streams")
     pr.add_argument("--out", type=pathlib.Path, default=pathlib.Path("media_out"))
-    pr.add_argument("--port", type=int, default=5670)
+    pr.add_argument("--port", type=int, default=15670)
     pr.add_argument("--interface", type=str, default=None)
     pr.add_argument("--verbose", action="store_true")
     args = p.parse_args()

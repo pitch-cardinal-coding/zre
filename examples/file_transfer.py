@@ -6,8 +6,8 @@ Uses WHISPER for private file transfers between peers.
 Works with any local file.
 
 Usage:
-  python3 examples/file_transfer.py receive ./out --port 5670
-  python3 examples/file_transfer.py send <peer_hex> ./sample.mp4 --port 5670
+  python3 examples/file_transfer.py receive ./out --port 15670
+  python3 examples/file_transfer.py send <peer_hex> ./sample.mp4 --port 15670
 """
 
 import argparse
@@ -143,14 +143,14 @@ def main():
     sub = p.add_subparsers(dest="mode", required=True)
     pr = sub.add_parser("receive", help="receive files")
     pr.add_argument("output_dir", type=Path)
-    pr.add_argument("--port", type=int, default=5670)
+    pr.add_argument("--port", type=int, default=15670)
     pr.add_argument("--interface", type=str, default=None)
     pr.add_argument("--verbose", action="store_true")
 
     ps = sub.add_parser("send", help="send file")
     ps.add_argument("peer_id", help="target peer hex id")
     ps.add_argument("filepath", type=Path, help="file to send (e.g. ./sample.mp4)")
-    ps.add_argument("--port", type=int, default=5670)
+    ps.add_argument("--port", type=int, default=15670)
     ps.add_argument("--interface", type=str, default=None)
     ps.add_argument("--verbose", action="store_true")
 

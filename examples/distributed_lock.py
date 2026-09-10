@@ -43,6 +43,7 @@ class DistributedLock:
         self.pending: dict[str, list[LockRequest]] = {}
         self.held: set[str] = set()
         self.votes: dict[str, set[str]] = {}
+        self._awaiting_grant: tuple[str, str] | None = None
 
     async def start(
         self,
@@ -64,6 +65,7 @@ class DistributedLock:
         req = LockRequest(lock_name, self.node_id, request_id, time.time())
         self.pending.setdefault(lock_name, []).append(req)
         self.votes.setdefault(lock_name, set()).add(self.node_id)
+        self._awaiting_grant = (lock_name, request_id)
         payload = {
             "type": "LOCK_REQUEST",
             "lock_name": lock_name,
@@ -80,8 +82,10 @@ class DistributedLock:
             if len(self.votes.get(lock_name, set())) >= needed:
                 self.held.add(lock_name)
                 self.locks[lock_name] = LockState.LOCKED
+                self._awaiting_grant = None
                 return True
             await asyncio.sleep(0.1)
+        self._awaiting_grant = None
         return False
 
     async def release(self, lock_name: str):
@@ -97,6 +101,18 @@ class DistributedLock:
         await self.node.shout(self.lock_group, json.dumps(payload).encode())
 
     async def handle_message(self, event):
+        if event.get("type") == "WHISPER":
+            try:
+                payload = json.loads(event["payload"].decode())
+            except ValueError:
+                return
+            if payload.get("type") == "LOCK_GRANT":
+                awaiting = self._awaiting_grant
+                if awaiting and payload.get("request_id") == awaiting[1]:
+                    self.votes.setdefault(awaiting[0], set()).add(
+                        payload.get("holder_id")
+                    )
+            return
         if event.get("type") != "SHOUT" or event.get("group") != "LOCKS":
             return
         try:
@@ -148,7 +164,7 @@ class DistributedLock:
 def main():
     p = argparse.ArgumentParser(description="ZRE distributed lock")
     p.add_argument("node_name", help="node name")
-    p.add_argument("--port", type=int, default=5670)
+    p.add_argument("--port", type=int, default=15670)
     p.add_argument("--interface", type=str, default=None)
     p.add_argument("--verbose", action="store_true")
     args = p.parse_args()
@@ -159,6 +175,10 @@ def main():
             lock.run(args.port, args.interface, args.verbose)
         )
         await asyncio.sleep(2)
+        for _ in range(25):
+            if lock.node.peers():
+                break
+            await asyncio.sleep(0.2)
         success = await lock.acquire("resource-1", timeout=10.0)
         if success:
             print(f"[{args.node_name}] Got lock! Doing work...")

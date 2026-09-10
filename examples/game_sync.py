@@ -145,6 +145,8 @@ class GameServer:
                         payload = event.get("payload", b"")
                         data = json.loads(payload.decode())
                         player_id = data.get("player_id")
+                        if player_id not in self.players:
+                            print(f"[Server] {player_id} joined the world")
                         self.players[player_id] = data
                     except Exception:
                         pass
@@ -162,11 +164,11 @@ def main():
     sub = p.add_subparsers(dest="mode", required=True)
     pc = sub.add_parser("client", help="run client")
     pc.add_argument("name", help="player name")
-    pc.add_argument("--port", type=int, default=5670)
+    pc.add_argument("--port", type=int, default=15670)
     pc.add_argument("--interface", type=str, default=None)
     pc.add_argument("--verbose", action="store_true")
     ps = sub.add_parser("server", help="run server")
-    ps.add_argument("--port", type=int, default=5670)
+    ps.add_argument("--port", type=int, default=15670)
     ps.add_argument("--interface", type=str, default=None)
     ps.add_argument("--verbose", action="store_true")
     args = p.parse_args()

@@ -155,7 +155,7 @@ async def status_callback(peer: PeerHealth, old: HealthStatus):
 def main():
     p = argparse.ArgumentParser(description="ZRE health monitor")
     p.add_argument("node_name", help="monitor node name")
-    p.add_argument("--port", type=int, default=5670)
+    p.add_argument("--port", type=int, default=15670)
     p.add_argument("--interface", type=str, default=None)
     p.add_argument("--verbose", action="store_true")
     args = p.parse_args()

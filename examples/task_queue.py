@@ -6,8 +6,8 @@ Coordinator SHOUTs tasks to group TASKS; workers WHISPER results back.
 Demonstrates Enterprise scenario: distributed task queues.
 
 Usage:
-  python3 examples/task_queue.py coordinator --port 5670
-  python3 examples/task_queue.py worker worker-1 --port 5670
+  python3 examples/task_queue.py coordinator --port 15670
+  python3 examples/task_queue.py worker worker-1 --port 15670
 """
 
 import argparse
@@ -143,12 +143,12 @@ def main():
     p = argparse.ArgumentParser(description="ZRE task queue")
     sub = p.add_subparsers(dest="mode", required=True)
     pc = sub.add_parser("coordinator", help="run coordinator")
-    pc.add_argument("--port", type=int, default=5670)
+    pc.add_argument("--port", type=int, default=15670)
     pc.add_argument("--interface", type=str, default=None)
     pc.add_argument("--verbose", action="store_true")
     pw = sub.add_parser("worker", help="run worker")
     pw.add_argument("name", help="worker name")
-    pw.add_argument("--port", type=int, default=5670)
+    pw.add_argument("--port", type=int, default=15670)
     pw.add_argument("--interface", type=str, default=None)
     pw.add_argument("--verbose", action="store_true")
     args = p.parse_args()
