@@ -43,20 +43,20 @@ async def run_presence(name: str, port: int, interface: str | None, verbose: boo
 
     async def handle_events():
         async for event in node.events():
-            t = event["type"]
+            etype = event["type"]
             pid = event.get("peer_id", "")[:8]
             pname = event.get("peer_name", "?")
-            if t == "ENTER":
+            if etype == "ENTER":
                 peers[event["peer_id"]] = {"name": pname, "seen": time.time()}
                 print(f"  + ENTER {pname} ({pid}) now {len(peers)} peers")
-            elif t == "EXIT":
+            elif etype == "EXIT":
                 peers.pop(event["peer_id"], None)
                 print(f"  - EXIT  {pname} ({pid}) now {len(peers)} peers")
-            elif t == "EVASIVE":
+            elif etype == "EVASIVE":
                 print(f"  ! EVASIVE {pname} ({pid})")
-            elif t == "JOIN":
+            elif etype == "JOIN":
                 print(f"    JOIN {pname} -> {event.get('group')}")
-            elif t == "LEAVE":
+            elif etype == "LEAVE":
                 print(f"    LEAVE {pname} -> {event.get('group')}")
 
     async def status_loop():
@@ -80,12 +80,12 @@ async def run_presence(name: str, port: int, interface: str | None, verbose: boo
 
 
 def main():
-    p = argparse.ArgumentParser(description="ZRE presence")
-    p.add_argument("name", help="peer name")
-    p.add_argument("--port", type=int, default=15670)
-    p.add_argument("--interface", type=str, default=None)
-    p.add_argument("--verbose", action="store_true")
-    args = p.parse_args()
+    parser = argparse.ArgumentParser(description="ZRE presence")
+    parser.add_argument("name", help="peer name")
+    parser.add_argument("--port", type=int, default=15670)
+    parser.add_argument("--interface", type=str, default=None)
+    parser.add_argument("--verbose", action="store_true")
+    args = parser.parse_args()
     try:
         asyncio.run(run_presence(args.name, args.port, args.interface, args.verbose))
     except KeyboardInterrupt:

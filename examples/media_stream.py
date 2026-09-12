@@ -31,8 +31,8 @@ def list_media():
     if not DEFAULT_MEDIA_DIR.exists():
         print(f"No dir {DEFAULT_MEDIA_DIR}")
         return
-    for p in sorted(DEFAULT_MEDIA_DIR.glob("*.mp4")):
-        print(f"{p.name:20} {p.stat().st_size / 1024 / 1024:.1f} MB")
+    for parser in sorted(DEFAULT_MEDIA_DIR.glob("*.mp4")):
+        print(f"{parser.name:20} {parser.stat().st_size / 1024 / 1024:.1f} MB")
 
 
 async def send_media(
@@ -183,10 +183,10 @@ async def recv_media(
 
 
 def main():
-    p = argparse.ArgumentParser(
+    parser = argparse.ArgumentParser(
         description="ZRE media stream (broadcast an mp4 to the MEDIA group)"
     )
-    sub = p.add_subparsers(dest="mode", required=True)
+    sub = parser.add_subparsers(dest="mode", required=True)
     ps = sub.add_parser("send", help="stream file via SHOUT")
     ps.add_argument(
         "--file",
@@ -211,7 +211,7 @@ def main():
     pr.add_argument("--port", type=int, default=15670)
     pr.add_argument("--interface", type=str, default=None)
     pr.add_argument("--verbose", action="store_true")
-    args = p.parse_args()
+    args = parser.parse_args()
     if args.mode == "send" and args.list:
         list_media()
         return

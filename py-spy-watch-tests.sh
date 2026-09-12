@@ -74,7 +74,7 @@ maybe_dump() {
 }
 
 # Patterns to match zre test processes — include pytest itself
-PATTERNS=("test_zre" "test_zyre" "pytest" "zre" "node.py")
+PATTERNS=("test_zre" "test_lan" "pytest" "zre" "node.py")
 
 while true; do
     found_any=0

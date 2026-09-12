@@ -39,28 +39,28 @@ async def chat_loop(name: str, port: int, interface: str | None, verbose: bool):
 
     async def event_printer():
         async for event in node.events():
-            t = event["type"]
-            n = event.get("peer_name", "?")
-            if t == "ENTER":
-                print(f"  >> {n} joined the chat")
-            elif t == "EXIT":
-                print(f"  >> {n} left the chat")
-            elif t == "JOIN":
-                print(f"  >> {n} joined {event.get('group', '')}")
-            elif t == "LEAVE":
-                print(f"  >> {n} left {event.get('group', '')}")
-            elif t == "SHOUT":
+            etype = event["type"]
+            peer_name = event.get("peer_name", "?")
+            if etype == "ENTER":
+                print(f"  >> {peer_name} joined the chat")
+            elif etype == "EXIT":
+                print(f"  >> {peer_name} left the chat")
+            elif etype == "JOIN":
+                print(f"  >> {peer_name} joined {event.get('group', '')}")
+            elif etype == "LEAVE":
+                print(f"  >> {peer_name} left {event.get('group', '')}")
+            elif etype == "SHOUT":
                 pl = event.get("payload", b"")
                 if isinstance(pl, bytes):
                     pl = pl.decode("utf-8", errors="replace")
-                print(f"  {n}: {pl}")
-            elif t == "WHISPER":
+                print(f"  {peer_name}: {pl}")
+            elif etype == "WHISPER":
                 pl = event.get("payload", b"")
                 if isinstance(pl, bytes):
                     pl = pl.decode("utf-8", errors="replace")
-                print(f"  {n} (private): {pl}")
-            elif t == "EVASIVE":
-                print(f"  >> {n} is evasive")
+                print(f"  {peer_name} (private): {pl}")
+            elif etype == "EVASIVE":
+                print(f"  >> {peer_name} is evasive")
 
     async def stdin_reader():
         reader = asyncio.StreamReader()
@@ -95,18 +95,18 @@ async def chat_loop(name: str, port: int, interface: str | None, verbose: bool):
 
 
 def main():
-    p = argparse.ArgumentParser(description="ZRE chat example")
-    p.add_argument(
+    parser = argparse.ArgumentParser(description="ZRE chat example")
+    parser.add_argument(
         "name", nargs="?", default=f"user-{uuid.uuid4().hex[:4]}", help="node name"
     )
-    p.add_argument(
+    parser.add_argument(
         "--port", type=int, default=15670, help="beacon UDP port (default 15670)"
     )
-    p.add_argument(
+    parser.add_argument(
         "--interface", type=str, default=None, help="network interface or IP"
     )
-    p.add_argument("--verbose", action="store_true", help="enable verbose logging")
-    args = p.parse_args()
+    parser.add_argument("--verbose", action="store_true", help="enable verbose logging")
+    args = parser.parse_args()
     try:
         asyncio.run(chat_loop(args.name, args.port, args.interface, args.verbose))
     except KeyboardInterrupt:

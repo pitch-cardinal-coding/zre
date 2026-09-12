@@ -160,8 +160,8 @@ class GameServer:
 
 
 def main():
-    p = argparse.ArgumentParser(description="ZRE game sync")
-    sub = p.add_subparsers(dest="mode", required=True)
+    parser = argparse.ArgumentParser(description="ZRE game sync")
+    sub = parser.add_subparsers(dest="mode", required=True)
     pc = sub.add_parser("client", help="run client")
     pc.add_argument("name", help="player name")
     pc.add_argument("--port", type=int, default=15670)
@@ -171,7 +171,7 @@ def main():
     ps.add_argument("--port", type=int, default=15670)
     ps.add_argument("--interface", type=str, default=None)
     ps.add_argument("--verbose", action="store_true")
-    args = p.parse_args()
+    args = parser.parse_args()
     if args.mode == "client":
         client = GameClient(args.name)
         try:

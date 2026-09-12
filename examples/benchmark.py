@@ -241,20 +241,22 @@ async def benchmark_scalability(port: int = 15670, interface: str | None = None)
 
 
 def main():
-    p = argparse.ArgumentParser(description="ZRE benchmark")
-    p.add_argument(
+    parser = argparse.ArgumentParser(description="ZRE benchmark")
+    parser.add_argument(
         "benchmark", choices=["discovery", "throughput", "latency", "scalability"]
     )
-    p.add_argument("--nodes", type=int, default=10, help="num nodes for discovery")
-    p.add_argument("--msgs", type=int, default=1000, help="num msgs for throughput")
-    p.add_argument("--size", type=int, default=1024, help="payload size")
-    p.add_argument("--pings", type=int, default=100, help="num pings for latency")
-    p.add_argument("--port", type=int, default=15670, help="beacon port")
-    p.add_argument(
+    parser.add_argument("--nodes", type=int, default=10, help="num nodes for discovery")
+    parser.add_argument(
+        "--msgs", type=int, default=1000, help="num msgs for throughput"
+    )
+    parser.add_argument("--size", type=int, default=1024, help="payload size")
+    parser.add_argument("--pings", type=int, default=100, help="num pings for latency")
+    parser.add_argument("--port", type=int, default=15670, help="beacon port")
+    parser.add_argument(
         "--interface", type=str, default=None, help="pin beacons to this interface"
     )
-    p.add_argument("--verbose", action="store_true")
-    args = p.parse_args()
+    parser.add_argument("--verbose", action="store_true")
+    args = parser.parse_args()
 
     try:
         if args.benchmark == "discovery":

@@ -59,9 +59,4 @@ if [ -f "$MONITOR_LOG" ]; then
     tail -20 "$MONITOR_LOG" || true
 fi
 
-# Backwards compat: also symlink old log name if different
-if [ "$MONITOR_LOG" != "/tmp/zyre-py-spy-watch.log" ] && [ -f "$MONITOR_LOG" ]; then
-    ln -sf "$MONITOR_LOG" /tmp/zyre-py-spy-watch.log 2>/dev/null || true
-fi
-
 exit $TEST_RESULT

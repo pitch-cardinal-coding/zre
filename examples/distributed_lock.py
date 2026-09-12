@@ -162,12 +162,12 @@ class DistributedLock:
 
 
 def main():
-    p = argparse.ArgumentParser(description="ZRE distributed lock")
-    p.add_argument("node_name", help="node name")
-    p.add_argument("--port", type=int, default=15670)
-    p.add_argument("--interface", type=str, default=None)
-    p.add_argument("--verbose", action="store_true")
-    args = p.parse_args()
+    parser = argparse.ArgumentParser(description="ZRE distributed lock")
+    parser.add_argument("node_name", help="node name")
+    parser.add_argument("--port", type=int, default=15670)
+    parser.add_argument("--interface", type=str, default=None)
+    parser.add_argument("--verbose", action="store_true")
+    args = parser.parse_args()
     lock = DistributedLock(args.node_name)
 
     async def demo():

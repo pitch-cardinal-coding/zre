@@ -40,6 +40,39 @@ python3 examples/fast_tick.py --role registry --port 14056 --interface virbr0
 python3 examples/fast_tick.py --role service --port 14056 --interface enp0s2
 ```
 
+### wan_direct.py — direct cross-subnet connection
+Same script both ends. Beacons cannot cross routers, so the client dials
+the far side's TCP port directly (`connect_peer`) and the HELLO exchange
+takes it from there. After that the peer is indistinguishable from a
+beacon-discovered one: `ENTER`, `JOIN`, `SHOUT`, `WHISPER`, `LEAVE`,
+`EVASIVE` heartbeats, `EXIT` on expiry.
+
+```bash
+python3 examples/wan_direct.py remote --listen-port 19870 --port 19871
+python3 examples/wan_direct.py local --peer 192.168.122.87:19870 --send "Hello WAN!" --wait 30
+```
+
+Extra flags (on top of the common `--port` / `--interface` / `--verbose` /
+`--help`): `--peer HOST:PORT` (repeatable — dial several far peers),
+`--listen-port` (pin the ROUTER socket so others can dial you),
+`--advertised-endpoint tcp://host:port` (NAT/port-forward setups: this
+address, not the auto-detected one, goes out in your `HELLO`),
+`--group` (default `CHAT`), `--send` (SHOUT once after the first `ENTER`),
+`--wait` seconds (`0` runs until Ctrl-C).
+
+Each side prints `READY inbox=<tcp-port>` on start, then one line per
+event. A healthy cross-subnet run looks like this on both ends:
+
+```text
+[remote] READY inbox=19870 beacon=19871 uuid=6d817862
+[remote] ENTER local tcp://192.168.122.1:39149
+[remote] SHOUT from local: Hello WAN!
+```
+
+Proven host to bridge VM across subnets (`192.168.8.x`/`192.168.122.1` ↔
+`192.168.122.87`, no shared broadcast domain): `ENTER` + `JOIN` both ways,
+`SHOUT` intact, `LEAVE` on departure, `EXIT` on expiry.
+
 ## Messaging
 
 ### chat.py — interactive chat room

@@ -50,12 +50,12 @@ async def run_board(
 
     async def handle_events():
         async for event in node.events():
-            t = event["type"]
-            if t == "ENTER":
+            etype = event["type"]
+            if etype == "ENTER":
                 print(f"  >> {event.get('peer_name')} entered whiteboard")
-            elif t == "EXIT":
+            elif etype == "EXIT":
                 print(f"  >> {event.get('peer_name')} left")
-            elif t == "SHOUT" and event.get("group") == "WHITEBOARD":
+            elif etype == "SHOUT" and event.get("group") == "WHITEBOARD":
                 try:
                     data = json.loads(event["payload"].decode())
                     strokes.append(data)
@@ -128,15 +128,15 @@ async def run_board(
 
 
 def main():
-    p = argparse.ArgumentParser(description="ZRE whiteboard")
-    p.add_argument("name", help="peer name")
-    p.add_argument("--port", type=int, default=15670)
-    p.add_argument("--interface", type=str, default=None)
-    p.add_argument("--verbose", action="store_true")
-    p.add_argument(
+    parser = argparse.ArgumentParser(description="ZRE whiteboard")
+    parser.add_argument("name", help="peer name")
+    parser.add_argument("--port", type=int, default=15670)
+    parser.add_argument("--interface", type=str, default=None)
+    parser.add_argument("--verbose", action="store_true")
+    parser.add_argument(
         "--demo", action="store_true", help="auto-generate strokes (for testing)"
     )
-    args = p.parse_args()
+    args = parser.parse_args()
     try:
         asyncio.run(
             run_board(args.name, args.port, args.interface, args.verbose, args.demo)

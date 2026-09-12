@@ -70,10 +70,10 @@ class HealthMonitor:
                 print(f"Callback error: {exc}")
 
     async def handle_event(self, event):
-        t = event["type"]
+        etype = event["type"]
         peer_id = event.get("peer_id", "")
         peer_name = event.get("peer_name", "unknown")
-        if t == "ENTER":
+        if etype == "ENTER":
             if peer_id not in self.peers:
                 self.peers[peer_id] = PeerHealth(peer_id=peer_id, name=peer_name)
             else:
@@ -81,13 +81,13 @@ class HealthMonitor:
             self.peers[peer_id].status = HealthStatus.HEALTHY
             self.peers[peer_id].last_seen = time.time()
             print(f"[Monitor] Peer joined: {peer_name} ({peer_id[:8]})")
-        elif t == "EXIT":
+        elif etype == "EXIT":
             if peer_id in self.peers:
                 old = self.peers[peer_id].status
                 self.peers[peer_id].status = HealthStatus.DEAD
                 self._notify(self.peers[peer_id], old)
                 print(f"[Monitor] Peer left: {peer_name} ({peer_id[:8]})")
-        elif t == "EVASIVE":
+        elif etype == "EVASIVE":
             if peer_id in self.peers:
                 old = self.peers[peer_id].status
                 self.peers[peer_id].status = HealthStatus.EVASIVE
@@ -96,12 +96,12 @@ class HealthMonitor:
                 print(
                     f"[Monitor] Peer evasive: {peer_name} ({peer_id[:8]}) count:{self.peers[peer_id].evasive_count}"
                 )
-        elif t == "JOIN":
+        elif etype == "JOIN":
             group = event.get("group", "")
             if peer_id in self.peers:
                 self.peers[peer_id].groups.add(group)
                 print(f"[Monitor] {peer_name} joined group: {group}")
-        elif t == "LEAVE":
+        elif etype == "LEAVE":
             group = event.get("group", "")
             if peer_id in self.peers:
                 self.peers[peer_id].groups.discard(group)
@@ -110,12 +110,14 @@ class HealthMonitor:
     def get_cluster_health(self) -> dict:
         total = len(self.peers)
         healthy = sum(
-            1 for p in self.peers.values() if p.status == HealthStatus.HEALTHY
+            1 for parser in self.peers.values() if parser.status == HealthStatus.HEALTHY
         )
         evasive = sum(
-            1 for p in self.peers.values() if p.status == HealthStatus.EVASIVE
+            1 for parser in self.peers.values() if parser.status == HealthStatus.EVASIVE
         )
-        dead = sum(1 for p in self.peers.values() if p.status == HealthStatus.DEAD)
+        dead = sum(
+            1 for parser in self.peers.values() if parser.status == HealthStatus.DEAD
+        )
         return {
             "total_peers": total,
             "healthy": healthy,
@@ -153,12 +155,12 @@ async def status_callback(peer: PeerHealth, old: HealthStatus):
 
 
 def main():
-    p = argparse.ArgumentParser(description="ZRE health monitor")
-    p.add_argument("node_name", help="monitor node name")
-    p.add_argument("--port", type=int, default=15670)
-    p.add_argument("--interface", type=str, default=None)
-    p.add_argument("--verbose", action="store_true")
-    args = p.parse_args()
+    parser = argparse.ArgumentParser(description="ZRE health monitor")
+    parser.add_argument("node_name", help="monitor node name")
+    parser.add_argument("--port", type=int, default=15670)
+    parser.add_argument("--interface", type=str, default=None)
+    parser.add_argument("--verbose", action="store_true")
+    args = parser.parse_args()
     mon = HealthMonitor(args.node_name)
     mon.register_status_callback(
         lambda peer, old: asyncio.create_task(status_callback(peer, old))

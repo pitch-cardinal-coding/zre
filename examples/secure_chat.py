@@ -77,9 +77,9 @@ class SecureChatNode:
         await self.node.whisper(peer_hex, payload)
 
     async def handle_event(self, event):
-        t = event["type"]
+        etype = event["type"]
         peer = event.get("peer_name", "unknown")
-        if t == "SHOUT" and event.get("group") == "SECURE_CHAT":
+        if etype == "SHOUT" and event.get("group") == "SECURE_CHAT":
             payload = event.get("payload", b"")
             if payload.startswith(b"ENCRYPTED:"):
                 enc = payload[10:]
@@ -91,7 +91,7 @@ class SecureChatNode:
                         f"[{self.name}] Decrypt failed from {peer}: {exc} "
                         "(both ends need the same --shared-key)"
                     )
-        elif t == "WHISPER":
+        elif etype == "WHISPER":
             payload = event.get("payload", b"")
             if payload.startswith(b"ENCRYPTED:"):
                 enc = payload[10:]
@@ -151,15 +151,15 @@ class SecureChatNode:
 
 
 def main():
-    p = argparse.ArgumentParser(description="ZRE secure chat")
-    p.add_argument("name", help="node name")
-    p.add_argument(
+    parser = argparse.ArgumentParser(description="ZRE secure chat")
+    parser.add_argument("name", help="node name")
+    parser.add_argument(
         "--shared-key", type=str, default=None, help="hex-encoded 32-byte shared key"
     )
-    p.add_argument("--port", type=int, default=15670)
-    p.add_argument("--interface", type=str, default=None)
-    p.add_argument("--verbose", action="store_true")
-    args = p.parse_args()
+    parser.add_argument("--port", type=int, default=15670)
+    parser.add_argument("--interface", type=str, default=None)
+    parser.add_argument("--verbose", action="store_true")
+    args = parser.parse_args()
     if ChaCha20Poly1305 is None:
         print(
             "ERROR: cryptography not installed. Run: python3 -m pip install cryptography",

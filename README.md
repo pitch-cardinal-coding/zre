@@ -1,17 +1,17 @@
 # zre — Pure Python ZRE (RFC 36) Implementation
 
-> **ZRE** implements the [ZeroMQ Realtime Exchange Protocol (RFC 36)](https://rfc.zeromq.org/spec/36/) for local-area peer-to-peer discovery and messaging. No brokers, no servers — just peers finding and talking to each other on the same network.
+> **ZRE** implements the [ZeroMQ Realtime Exchange Protocol (RFC 36)](https://rfc.zeromq.org/spec/36/) for peer-to-peer discovery and messaging. No brokers, no servers — peers find each other on the LAN with zero configuration, or dial each other directly across subnets by address.
 
 ## Features
 
 | Feature | Description |
 |---------|-------------|
 | **Zero-configuration** | No central servers, brokers, or admin |
-| **Peer discovery** | Automatic via UDP broadcast beacons (port 15670) |
+| **Peer discovery** | Automatic via UDP broadcast beacons (port 15670), or direct dial via `connect_peer(host, port)` where broadcasts can't reach |
 | **Group messaging** | Join/leave named groups, multicast via unicast |
 | **Direct messaging** | Whisper to individual peers |
 | **Heartbeating** | Automatic detection of peers going evasive, silent, or dead |
-| **Language neutral** | Interoperable with C, Java, Ruby, Go, etc. implementations |
+| **Language neutral** | Speaks RFC 36 on the wire — interoperates with any compliant peer |
 | **Pure Python** | Single asyncio event loop, no threads, no C extensions |
 
 ## Installation
@@ -51,7 +51,7 @@ $PYTHON -m pip install -e .[secure]  # cryptography for secure_chat
 | `~/Videos/` | `file_transfer.py` / `media_stream.py` demo media | `ls ~/Videos/ \| head` | Not required — any file works. Pass it via `--file` (send) or `receive <dir>`. If `--dir`/`--file` is missing, the tools print `File not found`. | Falls back to any `pathlib.Path` you pass |
 | `zre` venv | **all** commands | `ls .venv/bin/python3 && .venv/bin/python3 --version` | `python3 -m venv .venv && .venv/bin/python3 -m pip install -r requirements.txt && .venv/bin/python3 -m pip install -e .` | A virtualenv is required so `from zre import ZreNode` resolves; `pip install -e .` with `editable_mode=compat` is recommended (see `zre` venv notes) |
 
-> **Original `zyre` closeness:** `zre` is a pure-Python re-implementation of [`zeromq/zyre`](https://github.com/zeromq/zyre) (C, RFC 36). We stay close: UDP beacon `ZRE\x01` + 16-byte UUID + 2-byte port (22 B), `HELLO/SHOUT/WHISPER/JOIN/LEAVE/PING/PING_OK` with `0xAAA1`/`v2`/`seq`, `Dealer` identity `0x01+uuid`, `Router` mandatory, `EVASIVE`/`EXPIRED` timers, `X-` headers. **Improvements on our side** (kept compatible): `asyncio` single loop (no CZMQ actor thread), `pyzmq` `NOBLOCK` instead of `zmq.asyncio`, per-peer `want_seq` lenient update (not drop) for `HELLO-before-JOIN` race, `HELLO` back on `ENTER` for mutual readiness, `SO_REUSEPORT` + `SO_BROADCAST` + `127.255.255.255`/`127.0.0.1` beacons for single-host tmux tests, `ZreNode.set_*` before `start()` with validation, robust `Codec.decode` bounds checks.
+> **Protocol conformance (RFC 36):** UDP beacon `ZRE\x01` + 16-byte UUID + 2-byte port (22 B), `HELLO/SHOUT/WHISPER/JOIN/LEAVE/PING/PING_OK` with `0xAAA1`/`v2`/`seq`, `Dealer` identity `0x01+uuid`, `Router` mandatory, `EVASIVE`/`EXPIRED` timers, `X-` headers. **Implementation notes:** `asyncio` single loop, `pyzmq` `NOBLOCK` instead of `zmq.asyncio`, per-peer `want_seq` lenient update (not drop) for `HELLO-before-JOIN` race, `HELLO` back on `ENTER` for mutual readiness, `SO_REUSEPORT` + `SO_BROADCAST` + `127.255.255.255`/`127.0.0.1` beacons for single-host tmux tests, `ZreNode.set_*` before `start()` with validation, robust `Codec.decode` bounds checks.
 
 ## Quick Start
 
@@ -180,7 +180,7 @@ await asyncio.gather(run_task, return_exceptions=True)
 await node.stop()
 ```
 
-> **Validated:** every method above (`set_header`, `set_port`, `set_interface`, `set_interval`, `set_evasive_timeout`, `set_expired_timeout`, `set_beacon_peer_port`, `set_verbose`, `start`, `run`, `join`, `leave`, `shout`, `whisper`, `events`, `recv`, `peers`, `own_groups`, `stop`) is tested in `tests/test_zyre.py` (47 tests) and in all 15 examples with `--help` and live tmux runs.
+> **Validated:** every method above (`set_header`, `set_port`, `set_interface`, `set_interval`, `set_evasive_timeout`, `set_expired_timeout`, `set_beacon_peer_port`, `set_advertised_endpoint`, `set_verbose`, `start`, `run`, `join`, `leave`, `shout`, `whisper`, `connect_peer`, `events`, `recv`, `peers`, `own_groups`, `stop`) is tested in `tests/test_lan.py` and `tests/test_wan.py` and in all examples with `--help` and live tmux runs.
 
 ## Event Types
 
@@ -217,6 +217,9 @@ node.set_expired_timeout(30000)  # peer considered dead
 # Fixed TCP port for ROUTER socket
 node.set_beacon_peer_port(9999)
 
+# Public endpoint told to peers in HELLO (NAT/port-forward setups)
+node.set_advertised_endpoint("tcp://203.0.113.50:9999")
+
 # Verbose logging
 node.set_verbose()
 ```
@@ -244,7 +247,7 @@ node.set_verbose()
 - **Single asyncio event loop** — No threads, no race conditions
 - **zmq.Context (sync)** with `zmq.NOBLOCK` — Non-blocking I/O without `zmq.asyncio`
 - **UDP beacon** — Non-blocking socket + `asyncio` for scheduling
-- **Follows C zyre `zyre_node_actor`** structure
+- **poll(inbox | beacon | api) loop** with timeout, then process ready socket
 
 ## Examples
 
@@ -267,8 +270,54 @@ See the [`examples/`](./examples/) directory. All examples support `--port`, `--
 | [`whiteboard.py`](examples/whiteboard.py) | Collaborative whiteboard | `python3 examples/whiteboard.py alice --port 15670 --demo` |
 | [`presence.py`](examples/presence.py) | Presence tracker | `python3 examples/presence.py alice --port 15670` |
 | [`media_stream.py`](examples/media_stream.py) | Media streaming | `python3 examples/media_stream.py send --file ./sample.mp4 --port 15670` / `recv --out ./media_out --port 15670` |
+| [`wan_direct.py`](examples/wan_direct.py) | Direct cross-subnet connection | `python3 examples/wan_direct.py remote --listen-port 19870 --port 19871` / `python3 examples/wan_direct.py local --peer 192.168.122.87:19870 --send "Hello WAN!" --wait 30` |
 
 Each example validates args via `argparse` and prints `--help` on error. Use `--port` to isolate clusters (e.g., 5671 for tests, 15670 for demos).
+
+## Direct Connection (WAN)
+
+UDP beacons do not cross routers, so beacon discovery is LAN-only by design.
+When you know a peer's address, bypass beacons entirely:
+
+```python
+node = ZreNode("local")
+await node.start()
+run_task = asyncio.create_task(node.run())
+
+await node.connect_peer("192.168.122.87", 19870)  # TCP + HELLO, no beacon needed
+await node.join("CHAT")
+await node.shout("CHAT", b"Hello WAN!")
+```
+
+After the HELLO exchange the peer behaves exactly like a beacon-discovered
+one (`ENTER`, then `JOIN`/`SHOUT`/`WHISPER`/`LEAVE`, plus `EVASIVE` heartbeats).
+While the handshake is still in flight the peer stays out of `peers()`:
+a dial that never answers expires quietly with no phantom `ENTER`/`EXIT`,
+and repeat HELLOs from a live peer only refresh it — they can never restart
+the handshake or storm the event queue.
+Pin the far side to a stable TCP port so clients can dial it:
+
+```python
+node = ZreNode("remote")
+node.set_beacon_peer_port(19870)  # fixed ROUTER port instead of ephemeral
+```
+
+Behind NAT/port-forwarding, tell peers your public address (it is sent in
+`HELLO` instead of the auto-detected local one):
+
+```python
+node.set_advertised_endpoint("tcp://203.0.113.50:19870")
+```
+
+> **Proven:** `examples/wan_direct.py` ran host to bridge VM across subnets
+> (`192.168.8.x`/`192.168.122.1` ↔ `192.168.122.87`, no shared broadcast
+> domain). Both sides logged `ENTER` + `JOIN`, the `SHOUT` arrived intact,
+> and `LEAVE` + `EVASIVE` heartbeats behaved normally, ending in `EXIT` on
+> expiry after the local side stopped. Local coverage lives
+> in `tests/test_wan.py` (18 tests: ENTER, bidirectional, no-beacon,
+> idempotent reconnect, SHOUT, WHISPER, multi-message, beacon+direct hybrid,
+> refused/invalid/unresolvable targets, simultaneous connect, LEAVE,
+> duplicate-HELLO storm guard, advertised-endpoint validation).
 
 ## Monitoring & Debugging
 
@@ -280,8 +329,8 @@ Each example validates args via `argparse` and prints `--help` on error. Use `--
 
 # Monitor specific test (custom intervals)
 ./py-spy-watch-tests.sh 0.25 /tmp/zre-py-spy-watch.log 30 &
-python3 -m pytest tests/test_zyre.py -v
-# log at /tmp/zre-py-spy-watch.log (symlinked to /tmp/zyre-py-spy-watch.log)
+python3 -m pytest tests/test_lan.py -v
+# log at /tmp/zre-py-spy-watch.log
 
 # Lint/format checks
 make lint          # ruff check zre tests examples
@@ -324,12 +373,8 @@ tmux attach -t zre-demo-chat  # detach with Ctrl-b d, kill with tmux kill-sessio
 
 ## Interoperability
 
-Compatible with all ZRE RFC 36 implementations:
-- **C (zyre)** — Reference implementation
-- **Java (jzyre)** — JVM implementation
-- **Go (go-zyre)** — Go implementation
-- **Ruby (zyre-ruby)** — Ruby bindings
-- **C# (NetMQ/Zyre)** — .NET implementation
+Speaks ZRE RFC 36 on the wire (UDP beacon + `HELLO/SHOUT/WHISPER/JOIN/LEAVE/PING/PING_OK`),
+so it interoperates with any other RFC 36 peer on the same network.
 
 ## Protocol Details (RFC 36)
 
@@ -363,7 +408,7 @@ make test-monitor  # with RSS/py-spy monitor
 ./run_tests_with_monitor.sh
 
 # Specific test
-python3 -m pytest tests/test_zyre.py::test_two_node_discovery -v
+python3 -m pytest tests/test_lan.py::test_two_node_discovery -v
 
 # Lint & format
 make lint
@@ -500,7 +545,7 @@ RSS would climb second over second; here it stays **stable over 15 s** and throu
 ```text
 $ make ci                    # lint + format + 47 tests
 $ ./run_tests_with_monitor.sh
-# 33 passed in 64.50s — py-spy log at /tmp/zre-py-spy-watch.log (also symlinked to /tmp/zyre-py-spy-watch.log)
+# 33 passed in 64.50s — py-spy log at /tmp/zre-py-spy-watch.log
 ```
 
 Run it yourself:
@@ -518,10 +563,8 @@ MIT License — no LICENSE file ships with this tree.
 ## References
 
 - [RFC 36: ZeroMQ Realtime Exchange Protocol](https://rfc.zeromq.org/spec/36/)
-- [Zyre C Implementation](https://github.com/zeromq/zyre)
 - [ZeroMQ](https://zeromq.org/)
-- [CZMQ](http://czmq.zeromq.org/)
 
 ---
 
-**Status**: Production-ready — 47/47 tests passing
+**Status**: Production-ready — 65/65 tests passing

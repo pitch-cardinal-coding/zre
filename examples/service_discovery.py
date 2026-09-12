@@ -41,17 +41,17 @@ async def run_service_registry(
 
     async def printer():
         async for event in node.events():
-            t = event["type"]
+            etype = event["type"]
             peer_id = event.get("peer_id", "")
             peer_name = event.get("peer_name", "")
-            if t == "ENTER":
+            if etype == "ENTER":
                 print(f"  DISCOVERED: {peer_name} ({peer_id[:8]})")
                 services[peer_id] = {"name": peer_name}
-            elif t == "EXIT":
+            elif etype == "EXIT":
                 if peer_id in services:
                     print(f"  LOST: {services[peer_id]['name']}")
                     del services[peer_id]
-            elif t == "SHOUT" and event.get("group") == "SERVICES":
+            elif etype == "SHOUT" and event.get("group") == "SERVICES":
                 payload = event.get("payload", b"")
                 print(
                     f"  ANNOUNCEMENT from {peer_name}: {payload.decode(errors='replace')}"
@@ -129,11 +129,11 @@ async def run_client(port: int, interface: str | None, interval_ms: int, verbose
 
     async def printer():
         async for event in node.events():
-            t = event["type"]
-            if t == "ENTER":
+            etype = event["type"]
+            if etype == "ENTER":
                 peer_name = event.get("peer_name", "")
                 print(f"  Found service: {peer_name}")
-            elif t == "SHOUT" and event.get("group") == "SERVICES":
+            elif etype == "SHOUT" and event.get("group") == "SERVICES":
                 payload = event.get("payload", b"")
                 parts = payload.decode(errors="replace").split(":")
                 if len(parts) >= 3:
@@ -150,8 +150,8 @@ async def run_client(port: int, interface: str | None, interval_ms: int, verbose
 
 
 def main():
-    p = argparse.ArgumentParser(description="ZRE service discovery")
-    sub = p.add_subparsers(dest="mode", required=True)
+    parser = argparse.ArgumentParser(description="ZRE service discovery")
+    sub = parser.add_subparsers(dest="mode", required=True)
 
     pr = sub.add_parser("registry", help="run registry")
     pr.add_argument("--port", type=int, default=15670)
@@ -174,7 +174,7 @@ def main():
     pc.add_argument("--interval-ms", type=int, default=1000)
     pc.add_argument("--verbose", action="store_true")
 
-    args = p.parse_args()
+    args = parser.parse_args()
     if args.mode == "registry":
         try:
             asyncio.run(

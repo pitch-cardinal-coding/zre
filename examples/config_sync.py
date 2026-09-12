@@ -141,12 +141,12 @@ class ConfigManager:
 
 
 def main():
-    p = argparse.ArgumentParser(description="ZRE config sync")
-    p.add_argument("node_name", help="node name")
-    p.add_argument("--port", type=int, default=15670)
-    p.add_argument("--interface", type=str, default=None)
-    p.add_argument("--verbose", action="store_true")
-    args = p.parse_args()
+    parser = argparse.ArgumentParser(description="ZRE config sync")
+    parser.add_argument("node_name", help="node name")
+    parser.add_argument("--port", type=int, default=15670)
+    parser.add_argument("--interface", type=str, default=None)
+    parser.add_argument("--verbose", action="store_true")
+    args = parser.parse_args()
     mgr = ConfigManager(args.node_name)
     mgr.watch("database_url", lambda k, v: print(f"  DB URL changed: {v}"))
     mgr.watch("feature_flags", lambda k, v: print(f"  Feature flags: {v}"))

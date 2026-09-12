@@ -139,8 +139,8 @@ async def main_send(
 
 
 def main():
-    p = argparse.ArgumentParser(description="ZRE file transfer")
-    sub = p.add_subparsers(dest="mode", required=True)
+    parser = argparse.ArgumentParser(description="ZRE file transfer")
+    sub = parser.add_subparsers(dest="mode", required=True)
     pr = sub.add_parser("receive", help="receive files")
     pr.add_argument("output_dir", type=Path)
     pr.add_argument("--port", type=int, default=15670)
@@ -154,7 +154,7 @@ def main():
     ps.add_argument("--interface", type=str, default=None)
     ps.add_argument("--verbose", action="store_true")
 
-    args = p.parse_args()
+    args = parser.parse_args()
     try:
         if args.mode == "receive":
             asyncio.run(

@@ -185,14 +185,14 @@ async def run_aggregator(port: int, interface: str | None, verbose: bool):
 
 
 def main():
-    p = argparse.ArgumentParser(description="ZRE sensor network")
-    p.add_argument(
+    parser = argparse.ArgumentParser(description="ZRE sensor network")
+    parser.add_argument(
         "mode", choices=["sensors", "aggregator"], help="run sensors or aggregator"
     )
-    p.add_argument("--port", type=int, default=15670, help="beacon port")
-    p.add_argument("--interface", type=str, default=None)
-    p.add_argument("--verbose", action="store_true")
-    args = p.parse_args()
+    parser.add_argument("--port", type=int, default=15670, help="beacon port")
+    parser.add_argument("--interface", type=str, default=None)
+    parser.add_argument("--verbose", action="store_true")
+    args = parser.parse_args()
     try:
         if args.mode == "sensors":
             asyncio.run(run_sensors(args.port, args.interface, args.verbose))

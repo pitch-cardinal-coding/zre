@@ -43,10 +43,10 @@ async def run_coordinator(port: int, interface: str | None, verbose: bool):
 
     async def handle_events():
         async for event in node.events():
-            t = event["type"]
-            if t == "ENTER":
+            etype = event["type"]
+            if etype == "ENTER":
                 print(f"[coordinator] worker {event.get('peer_name')} entered")
-            elif t == "WHISPER":
+            elif etype == "WHISPER":
                 try:
                     data = json.loads(event["payload"].decode())
                     task_id = data.get("task_id")
@@ -140,8 +140,8 @@ async def run_worker(name: str, port: int, interface: str | None, verbose: bool)
 
 
 def main():
-    p = argparse.ArgumentParser(description="ZRE task queue")
-    sub = p.add_subparsers(dest="mode", required=True)
+    parser = argparse.ArgumentParser(description="ZRE task queue")
+    sub = parser.add_subparsers(dest="mode", required=True)
     pc = sub.add_parser("coordinator", help="run coordinator")
     pc.add_argument("--port", type=int, default=15670)
     pc.add_argument("--interface", type=str, default=None)
@@ -151,7 +151,7 @@ def main():
     pw.add_argument("--port", type=int, default=15670)
     pw.add_argument("--interface", type=str, default=None)
     pw.add_argument("--verbose", action="store_true")
-    args = p.parse_args()
+    args = parser.parse_args()
     if args.mode == "coordinator":
         try:
             asyncio.run(run_coordinator(args.port, args.interface, args.verbose))
