@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "zre"
-version = "0.1.1"
+version = "0.1.2"
 description = "Pure Python ZRE (RFC 36) implementation for peer-to-peer discovery and messaging over ZeroMQ"
 readme = "README.md"
 license = "MIT"
