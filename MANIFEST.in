@@ -1,0 +1,12 @@
+# Include OSS/community docs in the source distribution
+include LICENSE
+include CHANGELOG.md
+include CONTRIBUTING.md
+include CODE_OF_CONDUCT.md
+include SECURITY.md
+include README.md
+
+# Tests ship with the sdist so downstream packagers can run them
+recursive-include tests *.py
+
+# Keep ruff config available (it lives in pyproject.toml, included by default)
