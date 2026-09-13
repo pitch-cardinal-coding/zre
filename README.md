@@ -1,5 +1,10 @@
 # zre — Pure Python ZRE (RFC 36) Implementation
 
+[![PyPI](https://img.shields.io/pypi/v/zre.svg)](https://pypi.org/project/zre/)
+[![Python versions](https://img.shields.io/pypi/pyversions/zre.svg)](https://pypi.org/project/zre/)
+[![License: MIT](https://img.shields.io/pypi/l/zre.svg)](LICENSE)
+[![CI](https://github.com/pitch-cardinal-coding/zre/actions/workflows/release.yml/badge.svg)](https://github.com/pitch-cardinal-coding/zre/actions/workflows/release.yml)
+
 > **ZRE** implements the [ZeroMQ Realtime Exchange Protocol (RFC 36)](https://rfc.zeromq.org/spec/36/) for peer-to-peer discovery and messaging. No brokers, no servers — peers find each other on the LAN with zero configuration, or dial each other directly across subnets by address.
 
 ## Features
@@ -16,31 +21,31 @@
 
 ## Installation
 
+Requires Python 3.9+ on Linux or macOS.
+
 ```bash
 pip install zre
 ```
 
+With optional dependencies:
+
+| Extra | Provides | Install |
+|-------|----------|---------|
+| `secure` | `cryptography`, used by `examples/secure_chat.py` | `pip install "zre[secure]"` |
+| `dev` | pytest, pytest-asyncio, ruff | `pip install "zre[dev]"` |
+
+From a checkout of this repository:
+
 ```bash
-# Use the zre venv (required) — all commands below use this exact binary
-export PYTHON=python3
-$PYTHON --version  # Python 3.14.4
-
-# Option A: pinned latest (recommended, verified 2026-08-27)
-$PYTHON -m pip install -r requirements.txt
-$PYTHON -m pip install -e .
-
-# Option B: from pyproject (also pulls latest via pip)
-$PYTHON -m pip install -e .[dev]      # pytest, pytest-asyncio, ruff
-$PYTHON -m pip install -e .[secure]  # cryptography for secure_chat
+git clone https://github.com/pitch-cardinal-coding/zre.git
+cd zre
+python3 -m venv .venv && source .venv/bin/activate
+pip install -e .          # runtime
+pip install -e .[dev]     # + development tools
 ```
 
-> `requirements.txt` is generated from **live `pip freeze`** of the libs `zre` actually imports
-> (`zre/node.py` → `pyzmq`, `examples/secure_chat.py` → `cryptography`) plus dev tools.
-> Regenerate after `pip install -U`: 
-> ```bash
-> python3 -m pip install -U pyzmq cryptography pytest pytest-asyncio ruff
-> python3 -m pip freeze | grep -E "^(pyzmq|cryptography|pytest|ruff)" > requirements.txt
-> ```
+`requirements.txt` carries pinned versions of the dependency stack for
+reproducible environments; it is not needed for a normal install.
 
 ## Prerequisites — Extra Tools (like mpv / ffmpeg)
 
