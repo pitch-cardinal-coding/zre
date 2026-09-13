@@ -44,23 +44,20 @@ pip install -e .          # runtime
 pip install -e .[dev]     # + development tools
 ```
 
-`requirements.txt` carries pinned versions of the dependency stack for
-reproducible environments; it is not needed for a normal install.
+`requirements.txt` carries pinned versions of the dependency stack for reproducible environments; it is not needed for a normal install.
 
-## Prerequisites — Extra Tools (like mpv / ffmpeg)
+## Optional tools (for examples and profiling)
 
-`zre` core needs only `pyzmq` (and `cryptography` for `secure_chat`). Everything below is **optional**, but required for some examples and for full validation.
+The `zre` core needs only `pyzmq` (and `cryptography` for `secure_chat`). Everything below is **optional**, but required to run some examples or the profiling helpers:
 
-| Tool | Needed for | Check | Install if missing (Ubuntu/Debian) | What our code does if missing |
-|------|------------|-------|------------------------------------|-------------------------------|
-| `mpv` / `vlc` | `examples/media_stream.py` playback (optional) | `which mpv && mpv --version` | `sudo apt update && sudo apt install -y mpv` | `media_stream.py` saves to `--out`; play after with `mpv ./media_out/<file>.mp4` |
-| `ffmpeg` / `ffprobe` | re-mux for **true live** fragmented mp4, and file validation | `which ffmpeg && ffmpeg -version; which ffprobe && ffprobe -version` | `sudo apt install -y ffmpeg` | `media_stream.py` still works for `~/Videos/` mp4s (non-fragmented → `mpv` buffers until `MEDIA_END` then plays). For incremental live, re-mux: `ffmpeg -i input.mp4 -movflags frag_keyframe+empty_moov -c copy frag.mp4` — then `mpv` plays chunk-by-chunk as they arrive. |
-| `py-spy` | `py-spy-watch-tests.sh` / `run_tests_with_monitor.sh` RSS + stack dumps | `which py-spy || ls ~/.cargo/bin/py-spy` | `cargo install py-spy` or `pip install py-spy` (needs `sudo` for `dump` — without it we still log RSS) | Watcher prints `WARN: passwordless sudo unavailable — logging RSS only (dumps skipped)` and continues with `ps` RSS only |
-| `tmux` | `make demo-*` isolated panes, live `ps` validation | `which tmux && tmux -V` | `sudo apt install -y tmux` | You can still run examples directly: `python3 examples/chat.py alice --port 15670` in two terminals |
-| `~/Videos/` | `file_transfer.py` / `media_stream.py` demo media | `ls ~/Videos/ \| head` | Not required — any file works. Pass it via `--file` (send) or `receive <dir>`. If `--dir`/`--file` is missing, the tools print `File not found`. | Falls back to any `pathlib.Path` you pass |
-| `zre` venv | **all** commands | `ls .venv/bin/python3 && .venv/bin/python3 --version` | `python3 -m venv .venv && .venv/bin/python3 -m pip install -r requirements.txt && .venv/bin/python3 -m pip install -e .` | A virtualenv is required so `from zre import ZreNode` resolves; `pip install -e .` with `editable_mode=compat` is recommended (see `zre` venv notes) |
+| Tool | Needed for | Install if missing (Ubuntu/Debian) | Behavior if missing |
+|------|------------|------------------------------------|---------------------|
+| `mpv` / `vlc` | Playing `examples/media_stream.py` output | `sudo apt update && sudo apt install -y mpv` | `media_stream.py` still saves to `--out`; play the file afterwards |
+| `ffmpeg` | Re-muxing media for true live fragmented-mp4 playback | `sudo apt install -y ffmpeg` | `media_stream.py` still works for non-fragmented mp4s (player buffers until `MEDIA_END`) |
+| `py-spy` | `py-spy-watch-tests.sh` / `run_tests_with_monitor.sh` RSS + stack dumps | `pip install py-spy` | Watcher logs RSS via `ps` only and skips stack dumps |
+| `tmux` | `make demo-*` isolated panes | `sudo apt install -y tmux` | Run examples directly in separate terminals instead |
 
-> **Protocol conformance (RFC 36):** UDP beacon `ZRE\x01` + 16-byte UUID + 2-byte port (22 B), `HELLO/SHOUT/WHISPER/JOIN/LEAVE/PING/PING_OK` with `0xAAA1`/`v2`/`seq`, `Dealer` identity `0x01+uuid`, `Router` mandatory, `EVASIVE`/`EXPIRED` timers, `X-` headers. **Implementation notes:** `asyncio` single loop, `pyzmq` `NOBLOCK` instead of `zmq.asyncio`, per-peer `want_seq` lenient update (not drop) for `HELLO-before-JOIN` race, `HELLO` back on `ENTER` for mutual readiness, `SO_REUSEPORT` + `SO_BROADCAST` + `127.255.255.255`/`127.0.0.1` beacons for single-host tmux tests, `ZreNode.set_*` before `start()` with validation, robust `Codec.decode` bounds checks.
+> **Protocol conformance (RFC 36):** UDP beacon `ZRE\x01` + 16-byte UUID + 2-byte port (22 B), `HELLO/SHOUT/WHISPER/JOIN/LEAVE/PING/PING_OK` with `0xAAA1`/`v2`/`seq`, `Dealer` identity `0x01+uuid`, `Router` mandatory, `EVASIVE`/`EXPIRED` timers, `X-` headers. **Implementation notes:** `asyncio` single loop, `pyzmq` `NOBLOCK` instead of `zmq.asyncio`, per-peer `want_seq` lenient update (not drop) for `HELLO-before-JOIN` race, `HELLO` back on `ENTER` for mutual readiness, `SO_REUSEPORT` + `SO_BROADCAST` + loopback beacons for single-host tests, `ZreNode.set_*` before `start()` with validation, robust `Codec.decode` bounds checks.
 
 ## Quick Start
 
@@ -130,23 +127,23 @@ asyncio.run(main())
 - **Event venues** — Conferences, festivals, stadiums
 - **Vehicle-to-vehicle** — V2X communication (cars, drones)
 
-### Scenario → Example Mapping (all validated via tmux + live runs)
+### Scenario → Example Mapping
 
 | Scenario | Example | Command | What it proves |
 |----------|---------|---------|----------------|
 | Local chat, event venues, offline-first | `chat.py` | `python3 examples/chat.py alice --port 15670` | SHOUT + WHISPER + ENTER/EXIT |
 | Service discovery, clustering, service mesh | `service_discovery.py` | `python3 examples/service_discovery.py registry --port 15670` | X-ROLE headers + ENTER |
 | IoT sensor data | `sensor_network.py` | `python3 examples/sensor_network.py aggregator --port 15670` | SHOUT to SENSORS group, JSON payloads |
-| P2P file share, media streaming | `file_transfer.py`, `media_stream.py` | `python3 examples/file_transfer.py send <peer> ~/Videos/sample.mp4 --port 15670` / `python3 examples/media_stream.py send --file ~/Videos/sample.mp4 --port 15670` | WHISPER 64 KiB + SHOUT broadcast, 19 mp4s hash-verified |
-| Distributed task queues | `task_queue.py` | `python3 examples/task_queue.py coordinator --port 15670` / `worker w1 --port 15670` | SHOUT tasks + WHISPER results, 5 tasks validated |
-| Real-time whiteboard | `whiteboard.py` | `python3 examples/whiteboard.py alice --port 15670 --demo` | SHOUT JSON strokes, 3 peers validated |
+| P2P file share, media streaming | `file_transfer.py`, `media_stream.py` | `python3 examples/file_transfer.py send <peer> <file> --port 15670` / `python3 examples/media_stream.py send --file <file> --port 15670` | WHISPER 64 KiB + SHOUT broadcast |
+| Distributed task queues | `task_queue.py` | `python3 examples/task_queue.py coordinator --port 15670` / `worker w1 --port 15670` | SHOUT tasks + WHISPER results |
+| Real-time whiteboard | `whiteboard.py` | `python3 examples/whiteboard.py alice --port 15670 --demo` | SHOUT JSON strokes |
 | Presence, smart home | `presence.py` | `python3 examples/presence.py alice --port 15670` | ENTER/EXIT/EVASIVE table, no group needed |
 | Multiplayer game | `game_sync.py` | `python3 examples/game_sync.py server --port 15670` | 20 Hz SHOUT state sync |
 | Config sync | `config_sync.py` | `python3 examples/config_sync.py node-1 --port 15670` | SHOUT + version vectors |
 | Health monitoring | `health_monitor.py` | `python3 examples/health_monitor.py monitor --port 15670` | EVASIVE/EXIT tracking |
 | Distributed lock | `distributed_lock.py` | `python3 examples/distributed_lock.py node-1 --port 15670` | SHOUT + WHISPER grant |
 | Encrypted chat | `secure_chat.py` | `python3 examples/secure_chat.py alice --port 15670` | ChaCha20 via cryptography |
-| Benchmark & scale | `benchmark.py` | `python3 examples/benchmark.py scalability --port 5840` | 20-node mesh 0.20s (see Performance) |
+| Benchmark & scale | `benchmark.py` | `python3 examples/benchmark.py scalability --port 5840` | 20-node mesh in 0.20 s (see Performance) |
 
 ## API Overview
 
@@ -189,7 +186,7 @@ await asyncio.gather(run_task, return_exceptions=True)
 await node.stop()
 ```
 
-> **Validated:** every method above (`set_header`, `set_port`, `set_interface`, `set_interval`, `set_evasive_timeout`, `set_expired_timeout`, `set_beacon_peer_port`, `set_advertised_endpoint`, `set_verbose`, `start`, `run`, `join`, `leave`, `shout`, `whisper`, `connect_peer`, `events`, `recv`, `peers`, `own_groups`, `stop`) is tested in `tests/test_lan.py` and `tests/test_wan.py` and in all examples with `--help` and live tmux runs.
+> **Validated:** every method above (`set_header`, `set_port`, `set_interface`, `set_interval`, `set_evasive_timeout`, `set_expired_timeout`, `set_beacon_peer_port`, `set_advertised_endpoint`, `set_verbose`, `start`, `run`, `join`, `leave`, `shout`, `whisper`, `connect_peer`, `events`, `recv`, `peers`, `own_groups`, `stop`) is tested in `tests/test_lan.py` and `tests/test_wan.py` and in all examples with `--help` and live runs.
 
 ## Event Types
 
@@ -260,16 +257,16 @@ node.set_verbose()
 
 ## Examples
 
-See the [`examples/`](./examples/) directory. All examples support `--port`, `--interface`, `--verbose`, and `--help` (verified):
+See the [`examples/`](./examples/) directory. All examples support `--port`, `--interface`, `--verbose`, and `--help`:
 
 | Example | Description | Verified Command |
 |---------|-------------|------------------|
 | [`chat.py`](examples/chat.py) | Interactive chat room | `python3 examples/chat.py alice --port 15670` |
-| [`service_discovery.py`](examples/service_discovery.py) | Service registry pattern | `python3 examples/service_discovery.py registry --port 15670` / `python3 examples/service_discovery.py service my-svc api 8080 --port 15670` / `python3 examples/service_discovery.py client --port 15670` (all modes take `--interface` and `--interval-ms`) |
-| [`fast_tick.py`](examples/fast_tick.py) | 10ms beacon tick demo | `python3 examples/fast_tick.py --role registry --port 14056 --interface virbr0` / `--role service --port 14056 --interface enp0s2` |
-| [`file_transfer.py`](examples/file_transfer.py) | P2P file sharing | `python3 examples/file_transfer.py receive ./out --port 15670` / `python3 examples/file_transfer.py send <peer_hex> <file> --port 15670` |
-| [`sensor_network.py`](examples/sensor_network.py) | IoT sensor data aggregation | `python3 examples/sensor_network.py aggregator --port 15670` / `python3 examples/sensor_network.py sensors --port 15670` |
-| [`game_sync.py`](examples/game_sync.py) | Multiplayer game state sync | `python3 examples/game_sync.py server --port 15670` / `python3 examples/game_sync.py client Alice --port 15670` |
+| [`service_discovery.py`](examples/service_discovery.py) | Service registry pattern | `python3 examples/service_discovery.py registry --port 15670` / `service my-svc api 8080 --port 15670` / `client --port 15670` |
+| [`fast_tick.py`](examples/fast_tick.py) | 10ms beacon tick demo | `python3 examples/fast_tick.py --role registry --port 14056` (single box: drop `--interface` on both ends; pin it on multi-homed hosts) |
+| [`file_transfer.py`](examples/file_transfer.py) | P2P file sharing | `python3 examples/file_transfer.py receive ./out --port 15670` / `send <peer_hex> <file> --port 15670` |
+| [`sensor_network.py`](examples/sensor_network.py) | IoT sensor data aggregation | `python3 examples/sensor_network.py aggregator --port 15670` / `sensors --port 15670` |
+| [`game_sync.py`](examples/game_sync.py) | Multiplayer game state sync | `python3 examples/game_sync.py server --port 15670` / `client Alice --port 15670` |
 | [`distributed_lock.py`](examples/distributed_lock.py) | Distributed locking | `python3 examples/distributed_lock.py node-1 --port 15670` |
 | [`config_sync.py`](examples/config_sync.py) | Distributed config propagation | `python3 examples/config_sync.py node-1 --port 15670` |
 | [`health_monitor.py`](examples/health_monitor.py) | Peer health monitoring | `python3 examples/health_monitor.py monitor-1 --port 15670` |
@@ -279,7 +276,7 @@ See the [`examples/`](./examples/) directory. All examples support `--port`, `--
 | [`whiteboard.py`](examples/whiteboard.py) | Collaborative whiteboard | `python3 examples/whiteboard.py alice --port 15670 --demo` |
 | [`presence.py`](examples/presence.py) | Presence tracker | `python3 examples/presence.py alice --port 15670` |
 | [`media_stream.py`](examples/media_stream.py) | Media streaming | `python3 examples/media_stream.py send --file ./sample.mp4 --port 15670` / `recv --out ./media_out --port 15670` |
-| [`wan_direct.py`](examples/wan_direct.py) | Direct cross-subnet connection | `python3 examples/wan_direct.py remote --listen-port 19870 --port 19871` / `python3 examples/wan_direct.py local --peer 192.168.122.87:19870 --send "Hello WAN!" --wait 30` |
+| [`wan_direct.py`](examples/wan_direct.py) | Direct cross-subnet connection | `python3 examples/wan_direct.py remote --listen-port 19870 --port 19871` / `local --peer <host>:19870 --send "Hello WAN!" --wait 30` |
 
 Each example validates args via `argparse` and prints `--help` on error. Use `--port` to isolate clusters (e.g., 5671 for tests, 15670 for demos).
 
@@ -318,20 +315,19 @@ Behind NAT/port-forwarding, tell peers your public address (it is sent in
 node.set_advertised_endpoint("tcp://203.0.113.50:19870")
 ```
 
-> **Proven:** `examples/wan_direct.py` ran host to bridge VM across subnets
-> (`192.168.8.x`/`192.168.122.1` ↔ `192.168.122.87`, no shared broadcast
-> domain). Both sides logged `ENTER` + `JOIN`, the `SHOUT` arrived intact,
-> and `LEAVE` + `EVASIVE` heartbeats behaved normally, ending in `EXIT` on
-> expiry after the local side stopped. Local coverage lives
-> in `tests/test_wan.py` (18 tests: ENTER, bidirectional, no-beacon,
-> idempotent reconnect, SHOUT, WHISPER, multi-message, beacon+direct hybrid,
-> refused/invalid/unresolvable targets, simultaneous connect, LEAVE,
-> duplicate-HELLO storm guard, advertised-endpoint validation).
+> **Proven:** `examples/wan_direct.py` was validated across subnets with no
+> shared broadcast domain — both sides logged `ENTER` + `JOIN`, the `SHOUT`
+> arrived intact, and `LEAVE` + `EVASIVE` heartbeats behaved normally, ending
+> in `EXIT` on expiry. Local coverage lives in `tests/test_wan.py` (18 tests:
+> ENTER, bidirectional, no-beacon, idempotent reconnect, SHOUT, WHISPER,
+> multi-message, beacon+direct hybrid, refused/invalid/unresolvable targets,
+> simultaneous connect, LEAVE, duplicate-HELLO storm guard, advertised-endpoint
+> validation).
 
 ## Monitoring & Debugging
 
 ```bash
-# Run tests with memory/performance monitoring (zre Python required)
+# Run tests with memory/performance monitoring (requires py-spy)
 ./run_tests_with_monitor.sh
 # uses python3 -m pytest tests/ -v
 # and monitors RSS via py-spy every 0.25s, dumps via sudo py-spy every 30s
@@ -347,10 +343,10 @@ make check-format  # ruff format --check
 make format        # ruff format
 make ci            # check-format + lint + test
 
-# Memory profiling with memray (airbits venv carries it)
-PYTHONPATH=zre /home/iam/devcode/.env/airbits/bin/python3 -m memray run -o /tmp/zre-mem.bin examples/service_discovery.py registry --port 15670
-/home/iam/devcode/.env/airbits/bin/python3 -m memray summary /tmp/zre-mem.bin
-/home/iam/devcode/.env/airbits/bin/python3 -m memray stats /tmp/zre-mem.bin
+# Memory profiling with memray (optional)
+PYTHONPATH=zre python3 -m memray run -o /tmp/zre-mem.bin examples/service_discovery.py registry --port 15670
+python3 -m memray summary /tmp/zre-mem.bin
+python3 -m memray stats /tmp/zre-mem.bin
 ```
 
 ### Tmux-Isolated Demos
@@ -378,7 +374,6 @@ tmux attach -t zre-demo-chat  # detach with Ctrl-b d, kill with tmux kill-sessio
 # 2. Start peers in separate panes: python3 examples/<ex> <args> --port <port>
 # 3. Observe ENTER/JOIN/SHOUT/WHISPER/EXIT events
 ```
-
 
 ## Interoperability
 
@@ -408,7 +403,7 @@ Commands: `HELLO(1)`, `WHISPER(2)`, `SHOUT(3)`, `JOIN(4)`, `LEAVE(5)`, `PING(6)`
 ## Testing
 
 ```bash
-# Run all tests (uses zre Python)
+# Run all tests
 python3 -m pytest tests/ -v
 make test          # same, via Makefile
 make test-monitor  # with RSS/py-spy monitor
@@ -430,35 +425,28 @@ make ci
 | Metric | Validated Value | Method |
 |--------|-----------------|--------|
 | Memory per node | **28–29 MB RSS** (stable over 15 s) | `ps` + `/proc/<pid>/status VmRSS` on 4× `chat.py` in tmux |
-| Discovery 5 nodes | **0.10 s** | `benchmark.py discovery --nodes 5 --port 5780` |
-| Discovery 10 nodes | **0.10 s** | `benchmark.py discovery --nodes 10 --port 5781` |
-| Discovery 15 nodes | **0.20 s** | `benchmark.py scalability --port 5840` |
-| Discovery 20 nodes | **0.20 s** | `benchmark.py scalability --port 5840` |
+| Discovery 5 nodes | **0.10 s** | `benchmark.py discovery --nodes 5` |
+| Discovery 10 nodes | **0.10 s** | `benchmark.py discovery --nodes 10` |
+| Discovery 15 nodes | **0.20 s** | `benchmark.py scalability` |
+| Discovery 20 nodes | **0.20 s** | `benchmark.py scalability` |
 | Throughput | **178–179 messages/s, 1.5 Mb/s** (500–1000 msgs × 1 KiB) | `benchmark.py throughput --msgs 1000 --size 1024` |
 | Round-trip latency | **mean 15.37 ms, p50 17.03 ms, p99 18.35 ms** (0/100 lost) | `benchmark.py latency --pings 100` |
 | Max peers tested | **20 nodes** (full mesh) | `benchmark.py scalability` + `pytest test_ten_node_mesh` |
 | Groups per node | No implementation-imposed limit (bounded only by available memory) | `ZreNode.join()` |
 | Memory leak | **0 kB growth** over 15 s per node | `py-spy-watch-tests.sh` + live `ps` sampling |
-| 10ms tick discovery | **ENTER 0.00–2.57 s** both ends pinned, single-digit CPU | `fast_tick.py --role registry/service --port 14056 --interface <nic>`, host to bridge VM, measured 2026-09-09 |
+| 10ms tick discovery | **ENTER 0.00–2.57 s** both ends pinned, single-digit CPU | `fast_tick.py` across two hosts with pinned NICs |
 
-### Validated Proof — 2026-08-27, zre Python 3.14.4, 14 CPU, 22 GiB, tmux+py-spy+ps
+### Validation methodology
 
-> **How we validated:** every number below is from a real run on `probook-4-g1i` with
-> `python3` (not mocked). We used `tmux` to isolate
-> server/client panes, `py-spy-watch-tests.sh` (0.5 s RSS poll, 10 s dump) and `ps`/`/proc`
-> to watch memory. Logs at `/tmp/zre-perf-validation.log` and `/tmp/zre-py-spy-watch.log`.
-> See [Monitoring & Debugging](#monitoring--debugging) for commands.
-
-#### 1. Discovery (real tmux-isolated runs)
+All numbers above come from real runs (no mocks) on Python 3.14, using
+`tmux` to isolate each peer in its own pane/process, and `py-spy` (0.5 s RSS
+polling) plus `ps`/`/proc/<pid>/status` (`VmRSS`) for memory sampling.
+Representative receipts:
 
 ```text
 $ python3 examples/benchmark.py discovery --nodes 5 --port 5780
 === Discovery Benchmark: 5 nodes (port 5780) ===
 All 5 nodes discovered each other in 0.10s
-
-$ python3 examples/benchmark.py discovery --nodes 10 --port 5781
-=== Discovery Benchmark: 10 nodes (port 5781) ===
-All 10 nodes discovered each other in 0.10s
 
 $ python3 examples/benchmark.py scalability --port 5840
 === Scalability Benchmark ===
@@ -466,37 +454,11 @@ $ python3 examples/benchmark.py scalability --port 5840
 --- Testing 10 nodes — 0.10s
 --- Testing 15 nodes — 0.20s
 --- Testing 20 nodes — 0.20s
-```
 
-*Why it matters:* ZRE uses UDP beacons (port 15670 by default, `--port` isolates clusters). All peers
-hear each other in < 200 ms even at 20-node mesh — no central registry.
-
-> **Throughput Context**
->
-> ```text
-> 178 messages/s × 1 KiB = 1.5 Mb/s wire throughput
-> ```
->
-> This seems low, but it's expected for full mesh:
->
-> ```text
-> Effective per-node send: 178 × (n-1) messages/s
-> For 20 nodes: 178 × 19 = 3,382 internal messages/s per node
-> ```
->
-> The O(n²) fan-out is the bottleneck, not ZeroMQ.
-
-#### 2. Throughput & Latency (same host, `py-spy` watching)
-
-```text
 $ python3 examples/benchmark.py throughput --msgs 1000 --size 1024 --port 5782
 === Throughput Benchmark: 1000 msgs x 1024 bytes (port 5782) ===
 Sent 1000 messages in 5.59s
 Throughput: 179 messages/s, 1.5 Mb/s
-
-$ python3 examples/benchmark.py throughput --msgs 500 --size 1024 --port 5811
-Sent 500 messages in 2.81s
-Throughput: 178 messages/s, 1.5 Mb/s   # live RSS stable at 7580kB (see below)
 
 $ python3 examples/benchmark.py latency --pings 100 --port 5783
 === Latency Benchmark: 100 pings (port 5783) ===
@@ -504,60 +466,18 @@ Latency (ms): min=11.47, max=18.35, mean=15.37, p50=17.03, p99=18.35
 Lost: 0/100
 ```
 
-#### 3. Memory — `ps` + `py-spy` (no leak)
+> **Throughput context:** 178 messages/s × 1 KiB = 1.5 Mb/s wire throughput.
+> This is expected for a full mesh — the O(n²) fan-out is the bottleneck, not
+> ZeroMQ: effective per-node send is 178 × (n−1) messages/s (3,382 internal
+> messages/s per node at 20 peers).
 
-**Per-node RSS via `ps` on 4× `chat.py` in one tmux session (`zre-long-hold`, port 5830) — sampled 15 s (stable):**
+**Memory:** 4 concurrent `chat.py` nodes held a steady **28.8–29.0 MB RSS
+each** across a 15-second sampling window (0 kB growth per node), and a
+throughput run stayed flat at **~7.6 MB RSS for 30 consecutive samples**.
+If there were a leak, RSS would climb second over second; it does not.
 
-```text
-tmux panes:
-0 pid=260089 cmd=bash
-1 pid=260092 cmd=bash
-2 pid=260094 cmd=bash
-3 pid=260098 cmd=bash
+Reproduce any of it yourself:
 
-pgrep -f "chat.py.*5830":
-260097 .../chat.py alice   --port 5830  rss 28868kB
-260100 .../chat.py bob     --port 5830  rss 28880kB
-260101 .../chat.py charlie --port 5830  rss 28912kB
-260103 .../chat.py dave    --port 5830  rss 28800kB
-
---- second 1 to 15 (each chat pid) ---
-pid 261126 rss  28928 kB vsz 128148 kB  (alice, stable)
-pid 261130 rss  28872 kB vsz 128148 kB  (bob, stable)
-pid 261132 rss  28868 kB vsz 128152 kB  (charlie, stable)
-pid 261136 rss  28916 kB vsz 128148 kB  (dave, stable)
-# ... same values every second for 15 s — 0 kB growth
-```
-
-**`py-spy-watch` log (0.5 s poll) on benchmark:**
-```text
-09:23:44 thr pid=259644 rss=7580kB  # throughput 500 msgs
-09:23:44 thr pid=259644 rss=7580kB
-... 30 samples at 7580kB — no growth
-09:23:18 zre pid=227092 rss=3900kB (+52 kB since start)  # short-lived helper, then stable +0
-```
-
-**Live `ps` during 10-node discovery (timeout wrapper):**
-```text
-09:23:43 pid=259572 rss=7520 kB vsz=16248 kB  python .../benchmark.py discovery --nodes 10 --port 5810
-# benchmark finishes in 0.10s, RSS never spikes
-```
-
-*Explanation for readers:* we deliberately use **real OS memory** (`VmRSS` from `/proc/<pid>/status`,
-also `ps -o rss`) and **py-spy** (which needs `sudo` for dumps but always logs RSS). `tmux` gives
-each peer a real pane/pid so `ps` sees them separately — no hidden threads. If there were a leak,
-RSS would climb second over second; here it stays **stable over 15 s** and throughput run stays
-**7580kB for 30 samples**. That is the proof.
-
-#### 4. Full pytest with monitoring
-
-```text
-$ make ci                    # lint + format + 47 tests
-$ ./run_tests_with_monitor.sh
-# 33 passed in 64.50s — py-spy log at /tmp/zre-py-spy-watch.log
-```
-
-Run it yourself:
 ```bash
 python3 -m pytest tests/ -v
 ./py-spy-watch-tests.sh 0.25 /tmp/zre-py-spy-watch.log 30 &
