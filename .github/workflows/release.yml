@@ -1,0 +1,125 @@
+# zre release pipeline (PyPI distribution: zre).
+#
+#   push/PR to main  ->  test (py3.9/3.12/3.14: ruff + pytest)  ->  build (sdist+wheel, twine check)
+#   push of a v* tag ->  test -> build -> publish to PyPI via Trusted Publishing (OIDC, no tokens)
+#
+# One-time setup (per index): register the trusted publisher for project
+# `zre` — via the project's Publishing page once it exists, or the
+# account-level pending publisher form before the first publish:
+#
+#   PyPI:     https://pypi.org/manage/project/zre/publishing/
+#   TestPyPI: https://test.pypi.org/manage/project/zre/publishing/
+#
+#   Owner:            pitch-cardinal-coding
+#   Repository:       zre
+#   Workflow name:    release.yml
+#   Environment name: pypi          (TestPyPI entry: testpypi)
+#
+# Publishing then requires nothing but `git push origin vX.Y.Z` — no API
+# tokens, no ~/.pypirc. PyPI mints a short-lived OIDC credential per run.
+
+name: release
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+
+# contents:read is required for actions/checkout on PRIVATE repos: any
+# explicit permissions block replaces the default grants wholesale, and
+# without contents:read checkout fails with "repository not found".
+# Publish jobs below override this with the least privilege they need
+# (id-token:write for OIDC); they never check out code.
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: test py${{ matrix.python }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.9", "3.12", "3.14"]
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Install
+        run: python -m pip install -e ".[dev]"
+      - name: Ruff lint
+        run: ruff check zre tests examples
+      - name: Ruff format check
+        run: ruff format --check zre tests examples
+      - name: Pytest
+        run: python -m pytest tests/ -v --tb=short
+
+  build:
+    name: build + verify dists
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.14"
+      - name: Install build + twine
+        run: python -m pip install build twine
+      - name: Build sdist and wheel
+        run: python -m build
+      - name: Twine check
+        run: python -m twine check dist/*
+      - name: Smoke test the wheel in a clean venv
+        run: |
+          python -m venv /tmp/smoke
+          /tmp/smoke/bin/pip install dist/*.whl
+          /tmp/smoke/bin/python -c "import zre; print('wheel import OK:', zre.__version__)"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: dist
+          path: dist/
+          if-no-files-found: error
+
+  publish-pypi:
+    name: publish to PyPI
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [test, build]
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/project/zre/
+    permissions:
+      id-token: write # OIDC — Trusted Publishing
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: dist
+          path: dist/
+      - name: Sanity check tag vs version
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          ls dist/ | grep -q -- "-${TAG}.tar.gz"
+          ls dist/ | grep -q -- "-${TAG}-py3-none-any.whl"
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+
+  publish-testpypi:
+    name: publish to TestPyPI
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [test, build]
+    runs-on: ubuntu-latest
+    environment:
+      name: testpypi
+      url: https://test.pypi.org/project/zre/
+    permissions:
+      id-token: write # OIDC — Trusted Publishing
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: dist
+          path: dist/
+      - name: Publish to TestPyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/
