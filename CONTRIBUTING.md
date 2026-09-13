@@ -61,9 +61,15 @@ no API tokens involved:
 
    Owner `pitch-cardinal-coding`, repo `zre`, workflow `release.yml`,
    environment `pypi` (or `testpypi` on TestPyPI).
-2. Update `CHANGELOG.md` and bump `version` in `pyproject.toml` (and
-   `zre/__init__.py`).
-3. Tag and push: `git tag v0.2.0 && git push origin main --tags`.
+2. In a pull request, update `CHANGELOG.md` and bump `version` in
+   `pyproject.toml` (and `zre/__init__.py`). Merge it once CI is green —
+   direct pushes to `main` are blocked by branch protection.
+3. Sync `main`, then tag and push just the tag:
+   `git tag v0.2.0 && git push origin v0.2.0`. The tag push triggers the
+   test → build → publish pipeline.
+4. Approve the publish when the workflow pauses at the `pypi` environment
+   gate (Actions → the run → *Review deployments* → *Approve and deploy*).
+   Releases do not upload until a maintainer approves.
 
 The workflow tests on Python 3.9/3.12/3.14, builds the sdist + wheel,
 runs `twine check`, smoke-imports the wheel, then uploads to both
