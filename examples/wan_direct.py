@@ -26,7 +26,14 @@ import asyncio
 import sys
 import uuid
 
-from zre import ZreNode
+from _common import (
+    CollisionExit,
+    add_uuid_arg,
+    check_collision_event,
+    exit_on_uuid_collision,
+)
+
+from zre import UUIDCollisionError, ZreNode
 
 
 def parse_peer(value: str):
@@ -40,6 +47,8 @@ def parse_peer(value: str):
 
 async def run_node(args):
     node = ZreNode(args.name)
+    if args.uuid:
+        node.set_uuid(args.uuid)
     if args.port:
         node.set_port(args.port)
     if args.interface:
@@ -71,6 +80,7 @@ async def run_node(args):
     async def events():
         nonlocal sent
         async for event in node.events():
+            check_collision_event(event)
             etype = event["type"]
             peer = event.get("peer_name", "?")
             if etype == "ENTER":
@@ -130,6 +140,7 @@ def main(argv=None):
     parser.add_argument(
         "--advertised-endpoint", default=None, help="public tcp://host:port in HELLO"
     )
+    add_uuid_arg(parser)
     parser.add_argument("--group", default="CHAT", help="group to join")
     parser.add_argument("--send", default=None, help="message to SHOUT after ENTER")
     parser.add_argument(
@@ -141,6 +152,10 @@ def main(argv=None):
         asyncio.run(run_node(args))
     except KeyboardInterrupt:
         print("\nInterrupted, shutting down...")
+    except CollisionExit:
+        sys.exit(3)
+    except UUIDCollisionError as exc:
+        sys.exit(exit_on_uuid_collision(exc))
 
 
 if __name__ == "__main__":
@@ -148,4 +163,8 @@ if __name__ == "__main__":
         main()
     except KeyboardInterrupt:
         print("\nInterrupted, shutting down...")
+    except CollisionExit:
+        sys.exit(3)
+    except UUIDCollisionError as exc:
+        sys.exit(exit_on_uuid_collision(exc))
         sys.exit(0)

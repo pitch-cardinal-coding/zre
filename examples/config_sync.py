@@ -13,11 +13,19 @@ import asyncio
 import hashlib
 import json
 import logging
+import sys
 import time
 from dataclasses import asdict, dataclass
 from typing import Any
 
-from zre import ZreNode
+from _common import (
+    CollisionExit,
+    add_uuid_arg,
+    check_collision_event,
+    exit_on_uuid_collision,
+)
+
+from zre import UUIDCollisionError, ZreNode
 
 logger = logging.getLogger(__name__)
 
@@ -35,15 +43,20 @@ class ConfigUpdate:
 class ConfigManager:
     """Distributed configuration manager with last-writer-wins."""
 
-    def __init__(self, node_name: str):
+    def __init__(self, node_name: str, uuid_hex: str | None = None):
         self.node_name = node_name
         self.node_id = f"config-{node_name}"
         self.node = ZreNode(self.node_id)
+        if uuid_hex:
+            self.node.set_uuid(uuid_hex)
         self.node.set_header("X-ROLE", "config-manager")
         self.config_group = b"CONFIG"
         self.config: dict[str, Any] = {}
         self.versions: dict[str, int] = {}
         self.watchers: dict[str, list] = {}
+        # Strong refs to in-flight rebroadcast shouts (they are fire-and-
+        # forget; dropping the task would let the GC cancel them mid-send).
+        self._rebroadcast_tasks: set = set()
 
     async def start(
         self,
@@ -92,8 +105,32 @@ class ConfigManager:
     def watch(self, key: str, callback):
         self.watchers.setdefault(key, []).append(callback)
 
+    async def _broadcast_full_config(self):
+        """Re-send every known key so newly entered peers converge."""
+        for key, value in self.config.items():
+            update = ConfigUpdate(
+                key=key,
+                value=value,
+                version=self.versions.get(key, 0),
+                timestamp=time.time(),
+                source_id=self.node_id,
+                checksum=self._checksum(value),
+            )
+            payload = json.dumps(asdict(update)).encode()
+            task = asyncio.create_task(self.node.shout(self.config_group, payload))
+            self._rebroadcast_tasks.add(task)
+            task.add_done_callback(self._rebroadcast_tasks.discard)
+
     async def handle_message(self, event):
-        if event.get("type") != "SHOUT" or event.get("group") != "CONFIG":
+        etype = event.get("type")
+        if etype == "ENTER":
+            # A peer that joins after updates were made missed them all
+            # (updates are only SHOUTed at set-time). Rebroadcast the full
+            # config so late joiners converge without polling.
+            if event.get("peer_id") != self.node.peer_id_hex and self.config:
+                await self._broadcast_full_config()
+            return
+        if etype != "SHOUT" or event.get("group") != "CONFIG":
             return
         try:
             payload = json.loads(event["payload"].decode())
@@ -130,6 +167,7 @@ class ConfigManager:
 
         async def event_loop():
             async for event in self.node.events():
+                check_collision_event(event)
                 await self.handle_message(event)
 
         try:
@@ -145,9 +183,10 @@ def main():
     parser.add_argument("node_name", help="node name")
     parser.add_argument("--port", type=int, default=15670)
     parser.add_argument("--interface", type=str, default=None)
+    add_uuid_arg(parser)
     parser.add_argument("--verbose", action="store_true")
     args = parser.parse_args()
-    mgr = ConfigManager(args.node_name)
+    mgr = ConfigManager(args.node_name, args.uuid)
     mgr.watch("database_url", lambda k, v: print(f"  DB URL changed: {v}"))
     mgr.watch("feature_flags", lambda k, v: print(f"  Feature flags: {v}"))
 
@@ -160,6 +199,7 @@ def main():
         # event printer
         async def ev_loop():
             async for evt in mgr.node.events():
+                check_collision_event(evt)
                 await mgr.handle_message(evt)
 
         et = asyncio.create_task(ev_loop())
@@ -180,6 +220,10 @@ def main():
         asyncio.run(full())
     except KeyboardInterrupt:
         print("\nInterrupted, shutting down...")
+    except CollisionExit:
+        sys.exit(3)
+    except UUIDCollisionError as exc:
+        sys.exit(exit_on_uuid_collision(exc))
 
 
 if __name__ == "__main__":
@@ -187,3 +231,7 @@ if __name__ == "__main__":
         main()
     except KeyboardInterrupt:
         print("\nInterrupted, shutting down...")
+    except CollisionExit:
+        sys.exit(3)
+    except UUIDCollisionError as exc:
+        sys.exit(exit_on_uuid_collision(exc))

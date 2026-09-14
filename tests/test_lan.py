@@ -34,6 +34,7 @@ from zre.node import (
     Codec,
     Group,
     Peer,
+    UUIDCollisionError,
     ZreNode,
 )
 
@@ -96,9 +97,6 @@ async def cleanup(n1, n2, t1, t2):
     await asyncio.gather(t1, t2, return_exceptions=True)
     await n1.stop()
     await n2.stop()
-
-
-# Codec Tests
 
 
 class TestCodec:
@@ -180,9 +178,6 @@ class TestCodec:
         assert buf == b"\x00\x00\x00\x05world"
 
 
-# Peer Tests
-
-
 class TestPeer:
     def test_peer_init(self):
         peer = Peer("abcd1234", "127.0.0.1", 9999)
@@ -216,9 +211,6 @@ class TestPeer:
         assert peer.check_seq(SHOUT, 4) is True
 
 
-# Group Tests
-
-
 class TestGroup:
     def test_group_join_leave(self):
         group = Group(b"CHAT")
@@ -236,9 +228,6 @@ class TestGroup:
         peer = Peer("aaa", "127.0.0.1", 1)
         group.leave(peer)
         assert len(group.peers) == 0
-
-
-# Node Lifecycle Tests
 
 
 @pytest.mark.asyncio
@@ -271,9 +260,6 @@ async def test_node_set_header():
     node.set_header("X-ROLE", "worker")
     assert node._headers[b"X-ROLE"] == b"worker"
     await node.stop()
-
-
-# Two-Node Tests
 
 
 @pytest.mark.asyncio
@@ -323,9 +309,6 @@ async def test_two_node_leave_events():
     await cleanup(n1, n2, t1, t2)
 
 
-# Multi-Node Stress Tests
-
-
 @pytest.mark.asyncio
 async def test_five_node_mesh():
     """5 nodes form a full mesh."""
@@ -368,9 +351,6 @@ async def test_ten_node_mesh():
     await asyncio.gather(*tasks, return_exceptions=True)
     for n in nodes:
         await n.stop()
-
-
-# Messaging Tests
 
 
 @pytest.mark.asyncio
@@ -428,9 +408,6 @@ async def test_shout_multiple_messages():
     shouts = await wait_event_count(n2, "SHOUT", 5, timeout=3)
     assert len(shouts) >= 5, f"Expected 5 SHOUTs, got {len(shouts)}"
     await cleanup(n1, n2, t1, t2)
-
-
-# Interface & Beacon Tests (pinned subnets, own-address HELLO)
 
 
 class TestInterfaceResolution:
@@ -521,8 +498,12 @@ async def test_send_socket_persists_and_caches_targets():
 
 
 @pytest.mark.asyncio
-async def test_self_hello_ignored():
-    """A node never creates a peer entry for its own HELLO."""
+async def test_self_hello_same_endpoint_ignored():
+    """An own-uuid HELLO from our own endpoint is a loopback: ignored.
+
+    (zyre_node.c:1092 — libzyre ignores HELLO when the peer endpoint
+    matches the node's own endpoint.)
+    """
     node = ZreNode("self-hello")
     await node.start()
     try:
@@ -536,6 +517,52 @@ async def test_self_hello_ignored():
         await node._handle_hello(node.peer_id_hex, extra, None)
         assert node.peer_id_hex not in node.peers()
         assert len(node.peers()) == 0
+    finally:
+        await node.stop()
+
+
+@pytest.mark.asyncio
+async def test_self_hello_foreign_endpoint_collision():
+    """An own-uuid HELLO from a foreign endpoint means a duplicate uuid."""
+    node = ZreNode("collision-a")
+    await node.start()
+    try:
+        extra = {
+            "endpoint": b"tcp://127.0.0.1:1",
+            "groups": [],
+            "status": 0,
+            "name": b"collision-b",
+            "headers": {},
+        }
+        with pytest.raises(UUIDCollisionError):
+            await node._handle_hello(node.peer_id_hex, extra, None)
+    finally:
+        await node.stop()
+
+
+@pytest.mark.asyncio
+async def test_own_beacon_loopback_not_collision():
+    """A looped-back own beacon (carrying our inbox port) is ignored."""
+    node = ZreNode("loopback")
+    await node.start()
+    try:
+        beacon = b"ZRE\x01" + node.peer_id + struct.pack("!H", node._inbox_port)
+        node._handle_beacon(beacon, ("127.0.0.1", 12345))
+        assert node.peer_id_hex not in node.peers()
+    finally:
+        await node.stop()
+
+
+@pytest.mark.asyncio
+async def test_foreign_same_uuid_beacon_collision():
+    """A beacon with our uuid but a foreign inbox port is a collision."""
+    node = ZreNode("collision-c")
+    await node.start()
+    try:
+        foreign_port = node._inbox_port + 1
+        beacon = b"ZRE\x01" + node.peer_id + struct.pack("!H", foreign_port)
+        with pytest.raises(UUIDCollisionError):
+            node._handle_beacon(beacon, ("127.0.0.1", 12345))
     finally:
         await node.stop()
 
@@ -560,9 +587,6 @@ async def test_fast_tick_discovery():
         await cleanup(n1, n2, t1, t2)
 
 
-# Shutdown Tests
-
-
 @pytest.mark.asyncio
 async def test_exit_events_on_shutdown():
     """EXIT events emitted when node stops."""
@@ -581,3 +605,104 @@ async def test_exit_events_on_shutdown():
     await asyncio.gather(t1, t2, return_exceptions=True)
     await n1.stop()
     await n2.stop()
+
+
+class TestStableUuid:
+    def test_set_uuid_hex_string(self):
+        node = ZreNode("uuid-hex")
+        hex_id = "11223344556677889900aabbccddeeff"
+        node.set_uuid(hex_id)
+        assert node.peer_id == bytes.fromhex(hex_id)
+        assert node.peer_id_hex == hex_id
+
+    def test_set_uuid_raw_bytes(self):
+        node = ZreNode("uuid-raw")
+        raw = b"0123456789abcdef"
+        node.set_uuid(raw)
+        assert node.peer_id == raw
+        assert node.peer_id_hex == raw.hex()
+
+    def test_set_uuid_label_then_run(self):
+        # The core takes hex/bytes only; examples hash labels in parse_uuid
+        # (sha256[:32]). Mirror that here.
+        import hashlib
+
+        node = ZreNode("uuid-label")
+        hashed = hashlib.sha256(b"alice-laptop").hexdigest()[:32]
+
+        async def body():
+            node.set_uuid(hashed)
+            await node.start()
+            assert node.peer_id_hex == hashed
+            await node.stop()
+
+        asyncio.run(body())
+
+    def test_set_uuid_rejects_wrong_length(self):
+        node = ZreNode("uuid-bad")
+        # Odd-length hex is invalid.
+        with pytest.raises(ValueError):
+            node.set_uuid("112233")
+        # Valid hex but 8 bytes.
+        with pytest.raises(ValueError):
+            node.set_uuid("1122334455667788")
+        with pytest.raises(ValueError):
+            node.set_uuid(b"short")
+
+    def test_set_uuid_rejects_all_zero(self):
+        node = ZreNode("uuid-zero")
+        with pytest.raises(ValueError):
+            node.set_uuid("00000000000000000000000000000000")
+
+    def test_set_uuid_rejected_after_start(self):
+        node = ZreNode("uuid-late")
+
+        async def body():
+            await node.start()
+            with pytest.raises(RuntimeError):
+                node.set_uuid("11223344556677889900aabbccddeeff")
+            await node.stop()
+
+        asyncio.run(body())
+
+    async def test_fixed_uuid_flows_to_peers(self):
+        n1 = ZreNode("uuid-fixed")
+        n2 = ZreNode("uuid-plain")
+        n1.set_uuid("11223344556677889900aabbccddeeff")
+        await n1.start()
+        await n2.start()
+        t1 = asyncio.create_task(n1.run())
+        t2 = asyncio.create_task(n2.run())
+        try:
+            ev = await wait_event(n2, "ENTER", timeout=5.0)
+            assert ev is not None
+            assert ev["peer_id"] == "11223344556677889900aabbccddeeff"
+        finally:
+            await cleanup(n1, n2, t1, t2)
+
+
+class TestEvasiveRateLimit:
+    async def test_evasive_emitted_once_per_episode(self):
+        n1 = ZreNode("ev-a")
+        n2 = ZreNode("ev-b")
+        # Fast beacons for quick discovery.
+        n1.set_interval(100)
+        n2.set_interval(100)
+        await n1.start()
+        await n2.start()
+        t1 = asyncio.create_task(n1.run())
+        t2 = asyncio.create_task(n2.run())
+        try:
+            ev = await wait_event(n1, "ENTER", timeout=5.0)
+            assert ev is not None, "discovery failed"
+            # silence n2: stop its loop so it never answers pings or beacons
+            t2.cancel()
+            await asyncio.gather(t2, return_exceptions=True)
+            # n1 default evasive timeout 5 s -> first EVASIVE within ~7 s
+            first = await wait_event(n1, "EVASIVE", timeout=10.0)
+            assert first is not None, "no EVASIVE seen"
+            # rate limit is 20 s: next EVASIVE must NOT arrive before ~19 s
+            nxt = await wait_event(n1, "EVASIVE", timeout=8.0)
+            assert nxt is None, "EVASIVE re-emitted before the 20 s window"
+        finally:
+            await cleanup(n1, n2, t1, t2)

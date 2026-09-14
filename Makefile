@@ -1,4 +1,4 @@
-.PHONY: lint fix format test test-monitor clean check-format style ci help install-dev demo-chat demo-discovery demo-sensor demo-benchmark demo-all
+.PHONY: lint fix format test test-monitor clean check-format style ci help install-dev demo-chat demo-discovery demo-sensor demo-benchmark demo-all cross-smoke
 
 # Python and tool — use the zre venv (override via make PYTHON=... RUFF=...)
 PYTHON ?= /home/iam/devcode/.env/zre/bin/python3
@@ -6,7 +6,7 @@ RUFF   := $(dir $(PYTHON))ruff
 PYTEST := pytest
 
 # Source files — relative to repo root (this Makefile lives in zre/)
-SRC := zre tests examples
+SRC := zre tests examples scripts
 
 # Default target — show help
 help:
@@ -15,6 +15,7 @@ help:
 	@echo "  make example-chat / example-service-discovery / example-sensor-network / example-benchmark / example-fast-tick"
 	@echo "  make demo-chat / demo-discovery / demo-sensor / demo-benchmark  (tmux isolated)"
 	@echo "  make clean / install-dev"
+	@echo "  make cross-smoke PEER=user@host PASSWORD=... [HOST_IFACE=...] [GROUPS=all]"
 
 # Lint with ruff
 lint:
@@ -119,3 +120,39 @@ demo-benchmark:
 	$(PYTHON) examples/benchmark.py discovery --nodes 5 --port 15670
 
 demo-all: demo-chat
+
+# ---------------------------------------------------------------------------
+# Cross-network smoke test (two hosts, both directions)
+#
+#   make cross-smoke PEER=iam@192.168.122.87 PASSWORD=secret \
+#        REMOTE_DIR=~/buffy-zre HOST_IFACE=virbr0 FIRST_ADDR=192.168.122.1
+#
+#   FIRST_ADDR = this machine's IP as seen by the remote (enables wan_direct)
+#   GROUPS     = all | lan | coord | data | wan (comma-separated ok)
+# ---------------------------------------------------------------------------
+PEER         ?=
+PASSWORD     ?=
+REMOTE_DIR   ?= ~/buffy-zre
+HOST_IFACE   ?=
+REMOTE_IFACE ?=
+FIRST_ADDR   ?=
+GROUPS       ?= all
+BASE_PORT    ?= 24800
+
+CROSS_ARGS := --peer $(PEER) --remote-dir "$(REMOTE_DIR)" --groups $(GROUPS) --base-port $(BASE_PORT)
+ifneq ($(strip $(PASSWORD)),)
+CROSS_ARGS += --password "$(PASSWORD)"
+endif
+ifneq ($(strip $(HOST_IFACE)),)
+CROSS_ARGS += --host-iface $(HOST_IFACE)
+endif
+ifneq ($(strip $(REMOTE_IFACE)),)
+CROSS_ARGS += --remote-iface $(REMOTE_IFACE)
+endif
+ifneq ($(strip $(FIRST_ADDR)),)
+CROSS_ARGS += --first-addr $(FIRST_ADDR)
+endif
+
+cross-smoke:
+	@if [ -z "$(PEER)" ]; then echo "usage: make cross-smoke PEER=user@host PASSWORD=... [HOST_IFACE=iface] [FIRST_ADDR=ip] [GROUPS=all]"; exit 2; fi
+	$(PYTHON) scripts/cross_smoke.py $(CROSS_ARGS)

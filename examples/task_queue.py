@@ -13,14 +13,26 @@ Usage:
 import argparse
 import asyncio
 import json
+import sys
 import time
 import uuid
 
-from zre import ZreNode
+from _common import (
+    CollisionExit,
+    add_uuid_arg,
+    check_collision_event,
+    exit_on_uuid_collision,
+)
+
+from zre import UUIDCollisionError, ZreNode
 
 
-async def run_coordinator(port: int, interface: str | None, verbose: bool):
+async def run_coordinator(
+    port: int, interface: str | None, verbose: bool, uuid_hex: str | None = None
+):
     node = ZreNode("coordinator")
+    if uuid_hex:
+        node.set_uuid(uuid_hex)
     node.set_header("X-ROLE", "coordinator")
     if port:
         node.set_port(port)
@@ -43,6 +55,7 @@ async def run_coordinator(port: int, interface: str | None, verbose: bool):
 
     async def handle_events():
         async for event in node.events():
+            check_collision_event(event)
             etype = event["type"]
             if etype == "ENTER":
                 print(f"[coordinator] worker {event.get('peer_name')} entered")
@@ -93,8 +106,16 @@ async def run_coordinator(port: int, interface: str | None, verbose: bool):
         print("[coordinator] stopped")
 
 
-async def run_worker(name: str, port: int, interface: str | None, verbose: bool):
+async def run_worker(
+    name: str,
+    port: int,
+    interface: str | None,
+    verbose: bool,
+    uuid_hex: str | None = None,
+):
     node = ZreNode(f"worker-{name}")
+    if uuid_hex:
+        node.set_uuid(uuid_hex)
     node.set_header("X-ROLE", "worker")
     node.set_header("X-WORKER", name)
     if port:
@@ -114,6 +135,7 @@ async def run_worker(name: str, port: int, interface: str | None, verbose: bool)
 
     async def handle_events():
         async for event in node.events():
+            check_collision_event(event)
             if event["type"] == "SHOUT" and event.get("group") == "TASKS":
                 try:
                     data = json.loads(event["payload"].decode())
@@ -145,23 +167,35 @@ def main():
     pc = sub.add_parser("coordinator", help="run coordinator")
     pc.add_argument("--port", type=int, default=15670)
     pc.add_argument("--interface", type=str, default=None)
+    add_uuid_arg(pc)
     pc.add_argument("--verbose", action="store_true")
     pw = sub.add_parser("worker", help="run worker")
     pw.add_argument("name", help="worker name")
     pw.add_argument("--port", type=int, default=15670)
     pw.add_argument("--interface", type=str, default=None)
+    add_uuid_arg(pw)
     pw.add_argument("--verbose", action="store_true")
     args = parser.parse_args()
     if args.mode == "coordinator":
         try:
-            asyncio.run(run_coordinator(args.port, args.interface, args.verbose))
+            asyncio.run(
+                run_coordinator(args.port, args.interface, args.verbose, args.uuid)
+            )
         except KeyboardInterrupt:
             print("\nInterrupted, shutting down...")
+        except UUIDCollisionError as exc:
+            sys.exit(exit_on_uuid_collision(exc))
     else:
         try:
-            asyncio.run(run_worker(args.name, args.port, args.interface, args.verbose))
+            asyncio.run(
+                run_worker(
+                    args.name, args.port, args.interface, args.verbose, args.uuid
+                )
+            )
         except KeyboardInterrupt:
             print("\nInterrupted, shutting down...")
+        except UUIDCollisionError as exc:
+            sys.exit(exit_on_uuid_collision(exc))
 
 
 if __name__ == "__main__":
@@ -169,3 +203,7 @@ if __name__ == "__main__":
         main()
     except KeyboardInterrupt:
         print("\nInterrupted, shutting down...")
+    except CollisionExit:
+        sys.exit(3)
+    except UUIDCollisionError as exc:
+        sys.exit(exit_on_uuid_collision(exc))

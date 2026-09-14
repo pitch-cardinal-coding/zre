@@ -12,13 +12,29 @@ Usage:
 
 import argparse
 import asyncio
+import sys
 import time
 
-from zre import ZreNode
+from _common import (
+    CollisionExit,
+    add_uuid_arg,
+    check_collision_event,
+    exit_on_uuid_collision,
+)
+
+from zre import UUIDCollisionError, ZreNode
 
 
-async def run_presence(name: str, port: int, interface: str | None, verbose: bool):
+async def run_presence(
+    name: str,
+    port: int,
+    interface: str | None,
+    verbose: bool,
+    uuid_hex: str | None = None,
+):
     node = ZreNode(name)
+    if uuid_hex:
+        node.set_uuid(uuid_hex)
     node.set_header("X-ROLE", "presence")
     if port:
         node.set_port(port)
@@ -35,7 +51,7 @@ async def run_presence(name: str, port: int, interface: str | None, verbose: boo
         await asyncio.sleep(0.2)
     # presence needs no group, just beacons; join ALL for demo
     await node.join(b"ALL")
-    print(f"[presence {name}] started — beacon {port}, id {node.peer_id_hex[:8]}")
+    print(f"[presence {name}] started — beacon {port}, id {node.peer_id_hex}")
     print(f"[presence {name}] waiting for peers... (Ctrl-C to leave)")
 
     peers: dict[str, dict] = {}
@@ -43,6 +59,7 @@ async def run_presence(name: str, port: int, interface: str | None, verbose: boo
 
     async def handle_events():
         async for event in node.events():
+            check_collision_event(event)
             etype = event["type"]
             pid = event.get("peer_id", "")[:8]
             pname = event.get("peer_name", "?")
@@ -84,12 +101,19 @@ def main():
     parser.add_argument("name", help="peer name")
     parser.add_argument("--port", type=int, default=15670)
     parser.add_argument("--interface", type=str, default=None)
+    add_uuid_arg(parser)
     parser.add_argument("--verbose", action="store_true")
     args = parser.parse_args()
     try:
-        asyncio.run(run_presence(args.name, args.port, args.interface, args.verbose))
+        asyncio.run(
+            run_presence(args.name, args.port, args.interface, args.verbose, args.uuid)
+        )
     except KeyboardInterrupt:
         print("\nInterrupted, shutting down...")
+    except CollisionExit:
+        sys.exit(3)
+    except UUIDCollisionError as exc:
+        sys.exit(exit_on_uuid_collision(exc))
 
 
 if __name__ == "__main__":
@@ -97,3 +121,7 @@ if __name__ == "__main__":
         main()
     except KeyboardInterrupt:
         print("\nInterrupted, shutting down...")
+    except CollisionExit:
+        sys.exit(3)
+    except UUIDCollisionError as exc:
+        sys.exit(exit_on_uuid_collision(exc))

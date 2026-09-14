@@ -42,6 +42,12 @@ jobs:
       fail-fast: false
       matrix:
         python: ["3.9", "3.12", "3.14"]
+    env:
+      # Isolate the suite's UDP beacon port: runners and containers can
+      # host other ZRE-speaking services on the 15670 default, which the
+      # tests would otherwise discover as extra peers and fail cross-talk
+      # checks (tests/conftest.py maps the default to this port).
+      ZRE_TEST_PORT: 24190
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v7

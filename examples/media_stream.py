@@ -20,7 +20,14 @@ import sys
 import time
 import uuid
 
-from zre import ZreNode
+from _common import (
+    CollisionExit,
+    add_uuid_arg,
+    check_collision_event,
+    exit_on_uuid_collision,
+)
+
+from zre import UUIDCollisionError, ZreNode
 
 DEFAULT_MEDIA_DIR = pathlib.Path.home() / "Videos"
 CHUNK_SIZE = 64 * 1024
@@ -36,7 +43,11 @@ def list_media():
 
 
 async def send_media(
-    filepath: pathlib.Path, port: int, interface: str | None, verbose: bool
+    filepath: pathlib.Path,
+    port: int,
+    interface: str | None,
+    verbose: bool,
+    uuid_hex: str | None = None,
 ):
     if not filepath.exists():
         print(f"File not found: {filepath}")
@@ -45,6 +56,8 @@ async def send_media(
             list_media()
         return
     node = ZreNode(f"media-send-{uuid.uuid4().hex[:4]}")
+    if uuid_hex:
+        node.set_uuid(uuid_hex)
     node.set_header("X-ROLE", "media-send")
     if port:
         node.set_port(port)
@@ -103,10 +116,16 @@ async def send_media(
 
 
 async def recv_media(
-    out_dir: pathlib.Path, port: int, interface: str | None, verbose: bool
+    out_dir: pathlib.Path,
+    port: int,
+    interface: str | None,
+    verbose: bool,
+    uuid_hex: str | None = None,
 ):
     out_dir.mkdir(parents=True, exist_ok=True)
     node = ZreNode(f"media-recv-{uuid.uuid4().hex[:4]}")
+    if uuid_hex:
+        node.set_uuid(uuid_hex)
     node.set_header("X-ROLE", "media-recv")
     if port:
         node.set_port(port)
@@ -131,6 +150,7 @@ async def recv_media(
     async def handle():
         nonlocal current_handle, expected, received, current_name
         async for event in node.events():
+            check_collision_event(event)
             if event["type"] == "ENTER":
                 print(f"  + {event.get('peer_name')} entered")
             elif event["type"] == "SHOUT" and event.get("group") == "MEDIA":
@@ -205,11 +225,13 @@ def main():
     )
     ps.add_argument("--port", type=int, default=15670)
     ps.add_argument("--interface", type=str, default=None)
+    add_uuid_arg(ps)
     ps.add_argument("--verbose", action="store_true")
     pr = sub.add_parser("recv", help="receive streams")
     pr.add_argument("--out", type=pathlib.Path, default=pathlib.Path("media_out"))
     pr.add_argument("--port", type=int, default=15670)
     pr.add_argument("--interface", type=str, default=None)
+    add_uuid_arg(pr)
     pr.add_argument("--verbose", action="store_true")
     args = parser.parse_args()
     if args.mode == "send" and args.list:
@@ -223,14 +245,24 @@ def main():
         sys.exit(2)
     if args.mode == "send":
         try:
-            asyncio.run(send_media(args.file, args.port, args.interface, args.verbose))
+            asyncio.run(
+                send_media(
+                    args.file, args.port, args.interface, args.verbose, args.uuid
+                )
+            )
         except KeyboardInterrupt:
             print("\nInterrupted, shutting down...")
+        except UUIDCollisionError as exc:
+            sys.exit(exit_on_uuid_collision(exc))
     else:
         try:
-            asyncio.run(recv_media(args.out, args.port, args.interface, args.verbose))
+            asyncio.run(
+                recv_media(args.out, args.port, args.interface, args.verbose, args.uuid)
+            )
         except KeyboardInterrupt:
             print("\nInterrupted, shutting down...")
+        except UUIDCollisionError as exc:
+            sys.exit(exit_on_uuid_collision(exc))
 
 
 if __name__ == "__main__":
@@ -238,3 +270,7 @@ if __name__ == "__main__":
         main()
     except KeyboardInterrupt:
         print("\nInterrupted, shutting down...")
+    except CollisionExit:
+        sys.exit(3)
+    except UUIDCollisionError as exc:
+        sys.exit(exit_on_uuid_collision(exc))

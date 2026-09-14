@@ -14,7 +14,14 @@ import asyncio
 import os
 import sys
 
-from zre import ZreNode
+from _common import (
+    CollisionExit,
+    add_uuid_arg,
+    check_collision_event,
+    exit_on_uuid_collision,
+)
+
+from zre import UUIDCollisionError, ZreNode
 
 try:
     from cryptography.hazmat.primitives.ciphers.aead import ChaCha20Poly1305
@@ -43,9 +50,11 @@ class SecureChannel:
 
 
 class SecureChatNode:
-    def __init__(self, name: str, shared_key: bytes | None = None):
+    def __init__(self, name: str, shared_key: bytes | None = None, uuid_hex=None):
         self.name = name
         self.node = ZreNode(f"secure-{name}")
+        if uuid_hex:
+            self.node.set_uuid(uuid_hex)
         self.node.set_header("X-ENCRYPTED", "true")
         self.channel = SecureChannel(shared_key)
 
@@ -118,6 +127,7 @@ class SecureChatNode:
 
         async def event_handler():
             async for event in self.node.events():
+                check_collision_event(event)
                 await self.handle_event(event)
 
         async def input_handler():
@@ -158,6 +168,7 @@ def main():
     )
     parser.add_argument("--port", type=int, default=15670)
     parser.add_argument("--interface", type=str, default=None)
+    add_uuid_arg(parser)
     parser.add_argument("--verbose", action="store_true")
     args = parser.parse_args()
     if ChaCha20Poly1305 is None:
@@ -167,11 +178,15 @@ def main():
         )
         sys.exit(1)
     shared_key = bytes.fromhex(args.shared_key) if args.shared_key else None
-    node = SecureChatNode(args.name, shared_key)
+    node = SecureChatNode(args.name, shared_key, getattr(args, "uuid", None))
     try:
         asyncio.run(node.run(args.port, args.interface, args.verbose))
     except KeyboardInterrupt:
         print("\nInterrupted, shutting down...")
+    except CollisionExit:
+        sys.exit(3)
+    except UUIDCollisionError as exc:
+        sys.exit(exit_on_uuid_collision(exc))
 
 
 if __name__ == "__main__":
@@ -179,3 +194,7 @@ if __name__ == "__main__":
         main()
     except KeyboardInterrupt:
         print("\nInterrupted, shutting down...")
+    except CollisionExit:
+        sys.exit(3)
+    except UUIDCollisionError as exc:
+        sys.exit(exit_on_uuid_collision(exc))

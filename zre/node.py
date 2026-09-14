@@ -12,8 +12,10 @@ Usage:
     node = ZreNode("my-app")
     await node.start()
     await node.join("CHAT")
+
     async for event in node.events():
         print(event)
+
     await node.shout("CHAT", b"Hello!")
     await node.stop()
 """
@@ -36,12 +38,28 @@ ZRE_VERSION = 2
 HELLO, WHISPER, SHOUT, JOIN, LEAVE, PING, PING_OK = range(1, 8)
 BEACON_PORT = 15670
 BEACON_SIZE = 22
+
 # ioctl numbers for interface address/netmask lookup (Linux, stable ABI).
 SIOCGIFADDR = 0x8915
 SIOCGIFNETMASK = 0x891B
 DEFAULT_EV_MS = 5000
 DEFAULT_EX_MS = 30000
 REAP_INTERVAL_MS = 1000
+
+
+class ZreError(Exception):
+    """Base class for zre errors."""
+
+
+class UUIDCollisionError(ZreError):
+    """Another node on the network is running with our stable UUID.
+
+    Raised from run() when a peer announces our own peer id with a
+    different TCP endpoint — the signature of a second node started with
+    the same --uuid / set_uuid() value. Stable UUIDs must be unique among
+    concurrently running peers. Every node sharing the uuid stops itself:
+    leaving one alive would let whispers route to either node.
+    """
 
 
 class Codec:
@@ -303,6 +321,11 @@ class ZreNode:
         self._seq = 1
         self._ev_timeout = DEFAULT_EV_MS
         self._ex_timeout = DEFAULT_EX_MS
+        # EVASIVE re-emit throttle: an idle peer is probed every reap cycle
+        # (~1 s) once it goes quiet; without throttling the application sees
+        # an EVASIVE event per cycle for as long as the peer stays idle.
+        self._evasive_emit_interval = 20.0
+        self._evasive_emit_at: dict[str, float] = {}
         self._beacon_port = BEACON_PORT
         self._beacon_interval = 1.0
         self._last_beacon = 0.0
@@ -354,6 +377,30 @@ class ZreNode:
     def _ensure_not_running(self, method: str) -> None:
         if self._running:
             raise RuntimeError(f"{method}() must be called before start()")
+
+    def set_uuid(self, value: str | bytes) -> None:
+        """Set a stable peer UUID (32-char hex string or 16 raw bytes).
+
+        The UUID is the peer id used by whisper() and shown as peer_hex in
+        the examples; by default it is random per process. Set a stable one
+        so peer_hex survives restarts. Must be called before start().
+        """
+        self._ensure_not_running("set_uuid")
+        if isinstance(value, bytes):
+            raw = value
+        else:
+            try:
+                raw = bytes.fromhex(value)
+            except ValueError:
+                raise ValueError(
+                    "uuid must be a 32-char hex string or 16 raw bytes"
+                ) from None
+        if len(raw) != 16:
+            raise ValueError("uuid must be exactly 16 bytes (32 hex chars)")
+        if raw == b"\x00" * 16:
+            raise ValueError("uuid must not be all zero")
+        self.peer_id = raw
+        self.peer_id_hex = raw.hex()
 
     def set_interface(self, iface: str) -> None:
         """Set network interface (e.g., 'eth0' or '192.168.1.100')."""
@@ -594,7 +641,11 @@ class ZreNode:
         )
 
     async def events(self) -> AsyncIterator[dict]:
-        while self._running:
+        # Drain past `self._running`: the run loop can die (e.g. a uuid
+        # collision raises after emitting COLLISION) while a consumer is
+        # still about to start iterating — without the queue check that
+        # event would sit undelivered forever.
+        while self._running or not self._event_queue.empty():
             try:
                 yield await asyncio.wait_for(self._event_queue.get(), timeout=1.0)
             except asyncio.TimeoutError:
@@ -620,6 +671,32 @@ class ZreNode:
         last_reap = loop.time()
         reap_interval = REAP_INTERVAL_MS / 1000.0
 
+        try:
+            await self._run_loop(loop, last_reap, reap_interval)
+        except UUIDCollisionError as exc:
+            # Another node owns our uuid on this network. Emit a COLLISION
+            # event first so application event loops can report it (the
+            # exception itself is often swallowed by gather(...)), then
+            # shut down WITHOUT the goodbye beacon: broadcasting EXIT for
+            # our uuid would tell the *other* node's peers that it departed.
+            self._running = False
+            self._emit({"type": "COLLISION", "detail": str(exc)})
+            with contextlib.suppress(Exception):
+                for peer in list(self._peers.values()):
+                    peer.disconnect()
+            self._peers.clear()
+            for sock in (self._inbox, self._beacon_sock, self._send_sock):
+                if sock:
+                    with contextlib.suppress(Exception):
+                        sock.close()
+            self._beacon_sock = None
+            self._send_sock = None
+            self._log("stopped: uuid collision")
+            raise
+
+    async def _run_loop(
+        self, loop: asyncio.AbstractEventLoop, last_reap: float, reap_interval: float
+    ) -> None:
         while self._running:
             now = loop.time()
 
@@ -801,6 +878,16 @@ class ZreNode:
         remote_uuid = data[4:20]
         remote_port = struct.unpack("!H", data[20:22])[0]
         if remote_uuid == self.peer_id:
+            # A beacon with our uuid is usually our own broadcast looping
+            # back (the payload carries our inbox port), or our EXIT beacon
+            # (port 0). But a foreign node with the same stable uuid sends
+            # ITS inbox port — and TCP ROUTER binds are exclusive, so a
+            # port difference means a second node is live with our id.
+            if remote_port and remote_port != self._inbox_port:
+                raise UUIDCollisionError(
+                    f"another node with uuid {self.peer_id_hex} responded on "
+                    f"the network (beacon from {addr[0]}:{remote_port})"
+                )
             return
         rhex = remote_uuid.hex()
         try:
@@ -813,6 +900,7 @@ class ZreNode:
             peer = self._peers.pop(rhex, None)
             if peer:
                 peer.disconnect()
+                self._evasive_emit_at.pop(rhex, None)
                 self._emit(
                     {
                         "type": "EXIT",
@@ -895,6 +983,10 @@ class ZreNode:
 
         if peer is None or not peer.ready:
             return
+        if cmd in (WHISPER, SHOUT, JOIN, LEAVE):
+            # App-level traffic from the peer: a new quiet period after this
+            # is a fresh episode, so re-arm the EVASIVE throttle.
+            self._evasive_emit_at.pop(rhex, None)
         if peer.check_seq(cmd, seq):
             self._log(
                 "seq mismatch %s expected %s got %s, updating",
@@ -972,11 +1064,27 @@ class ZreNode:
     async def _handle_hello(
         self, rhex: str, extra: dict, existing: Peer | None
     ) -> None:
-        if rhex == self.peer_id_hex:
-            return
         ep = extra.get("endpoint")
+        if rhex == self.peer_id_hex:
+            # Own-uuid HELLO. If it announces our inbox port it is our own
+            # handshake looping back (a second process can never bind our
+            # TCP port) — ignore, matching zyre_node.c:1092. A different
+            # port means a second node runs with our stable uuid.
+            try:
+                helo_port = int(ep.decode().rsplit(":", 1)[1]) if ep else None
+            except (IndexError, ValueError, AttributeError):
+                helo_port = None
+            if helo_port == self._inbox_port:
+                return
+            raise UUIDCollisionError(
+                f"another node with uuid {self.peer_id_hex} announced itself "
+                f"(HELLO from {extra.get('endpoint', 'unknown')})"
+            )
         if not ep:
             return
+        # A HELLO is app-level liveness: re-arm the EVASIVE throttle so a
+        # later quiet period is reported as a fresh episode.
+        self._evasive_emit_at.pop(rhex, None)
         ep_str = self._bdec(ep)
         try:
             loop = asyncio.get_running_loop()
@@ -1062,6 +1170,7 @@ class ZreNode:
         pname = self._pname(peer)
         peer.disconnect()
         self._peers.pop(peer.uuid_hex, None)
+        self._evasive_emit_at.pop(peer.uuid_hex, None)
         self._emit(
             {
                 "type": "EXIT",
@@ -1079,13 +1188,20 @@ class ZreNode:
             if peer.expired_at and now > peer.expired_at:
                 await self._remove_peer(peer)
             elif peer.evasive_at and now > peer.evasive_at:
-                self._emit(
-                    {
-                        "type": "EVASIVE",
-                        "peer_id": peer.uuid_hex,
-                        "peer_name": self._pname(peer),
-                    }
-                )
+                # Probe every cycle, but emit EVASIVE to the application at
+                # most once per _evasive_emit_interval: the event means "the
+                # peer went quiet", not "still quiet" (matches libzyre, which
+                # fires per cycle — noisy for idle peers).
+                last = self._evasive_emit_at.get(peer.uuid_hex, 0.0)
+                if now - last >= self._evasive_emit_interval:
+                    self._evasive_emit_at[peer.uuid_hex] = now
+                    self._emit(
+                        {
+                            "type": "EVASIVE",
+                            "peer_id": peer.uuid_hex,
+                            "peer_name": self._pname(peer),
+                        }
+                    )
                 peer.send(Codec.encode_simple(PING, self._seq))
                 self._seq = (self._seq + 1) & 0xFFFF
                 if self._seq == 0:
