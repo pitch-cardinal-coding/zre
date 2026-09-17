@@ -16,14 +16,28 @@ otherwise beacons leave via the default route only.
 
 import argparse
 import asyncio
+import sys
 
-from zre import ZreNode
+from _common import (
+    CollisionExit,
+    add_uuid_arg,
+    check_collision_event,
+    exit_on_uuid_collision,
+)
+
+from zre import UUIDCollisionError, ZreNode
 
 
 async def run_service_registry(
-    port: int, interface: str | None, interval_ms: int, verbose: bool
+    port: int,
+    interface: str | None,
+    interval_ms: int,
+    verbose: bool,
+    uuid_hex: str | None = None,
 ):
     node = ZreNode("service-registry")
+    if uuid_hex:
+        node.set_uuid(uuid_hex)
     node.set_header("X-SERVICE", "registry")
     node.set_header("X-VERSION", "1.0")
     if port:
@@ -41,6 +55,7 @@ async def run_service_registry(
 
     async def printer():
         async for event in node.events():
+            check_collision_event(event)
             etype = event["type"]
             peer_id = event.get("peer_id", "")
             peer_name = event.get("peer_name", "")
@@ -74,8 +89,11 @@ async def run_service(
     interface: str | None,
     interval_ms: int,
     verbose: bool,
+    uuid_hex: str | None = None,
 ):
     node = ZreNode(service_name)
+    if uuid_hex:
+        node.set_uuid(uuid_hex)
     node.set_header("X-SERVICE", service_type)
     node.set_header("X-PORT", str(svc_port))
     if port:
@@ -113,8 +131,16 @@ async def run_service(
         await node.stop()
 
 
-async def run_client(port: int, interface: str | None, interval_ms: int, verbose: bool):
+async def run_client(
+    port: int,
+    interface: str | None,
+    interval_ms: int,
+    verbose: bool,
+    uuid_hex: str | None = None,
+):
     node = ZreNode("service-client")
+    if uuid_hex:
+        node.set_uuid(uuid_hex)
     if port:
         node.set_port(port)
     if interface:
@@ -129,6 +155,7 @@ async def run_client(port: int, interface: str | None, interval_ms: int, verbose
 
     async def printer():
         async for event in node.events():
+            check_collision_event(event)
             etype = event["type"]
             if etype == "ENTER":
                 peer_name = event.get("peer_name", "")
@@ -157,6 +184,7 @@ def main():
     pr.add_argument("--port", type=int, default=15670)
     pr.add_argument("--interface", type=str, default=None)
     pr.add_argument("--interval-ms", type=int, default=1000)
+    add_uuid_arg(pr)
     pr.add_argument("--verbose", action="store_true")
 
     ps = sub.add_parser("service", help="run a service")
@@ -166,12 +194,14 @@ def main():
     ps.add_argument("--port", type=int, default=15670)
     ps.add_argument("--interface", type=str, default=None)
     ps.add_argument("--interval-ms", type=int, default=1000)
+    add_uuid_arg(ps)
     ps.add_argument("--verbose", action="store_true")
 
     pc = sub.add_parser("client", help="run client")
     pc.add_argument("--port", type=int, default=15670)
     pc.add_argument("--interface", type=str, default=None)
     pc.add_argument("--interval-ms", type=int, default=1000)
+    add_uuid_arg(pc)
     pc.add_argument("--verbose", action="store_true")
 
     args = parser.parse_args()
@@ -179,11 +209,13 @@ def main():
         try:
             asyncio.run(
                 run_service_registry(
-                    args.port, args.interface, args.interval_ms, args.verbose
+                    args.port, args.interface, args.interval_ms, args.verbose, args.uuid
                 )
             )
         except KeyboardInterrupt:
             print("\nInterrupted, shutting down...")
+        except UUIDCollisionError as exc:
+            sys.exit(exit_on_uuid_collision(exc))
     elif args.mode == "service":
         try:
             asyncio.run(
@@ -195,17 +227,24 @@ def main():
                     args.interface,
                     args.interval_ms,
                     args.verbose,
+                    args.uuid,
                 )
             )
         except KeyboardInterrupt:
             print("\nInterrupted, shutting down...")
+        except UUIDCollisionError as exc:
+            sys.exit(exit_on_uuid_collision(exc))
     elif args.mode == "client":
         try:
             asyncio.run(
-                run_client(args.port, args.interface, args.interval_ms, args.verbose)
+                run_client(
+                    args.port, args.interface, args.interval_ms, args.verbose, args.uuid
+                )
             )
         except KeyboardInterrupt:
             print("\nInterrupted, shutting down...")
+        except UUIDCollisionError as exc:
+            sys.exit(exit_on_uuid_collision(exc))
 
 
 if __name__ == "__main__":
@@ -213,3 +252,7 @@ if __name__ == "__main__":
         main()
     except KeyboardInterrupt:
         print("\nInterrupted, shutting down...")
+    except CollisionExit:
+        sys.exit(3)
+    except UUIDCollisionError as exc:
+        sys.exit(exit_on_uuid_collision(exc))

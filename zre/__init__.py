@@ -1,6 +1,16 @@
 """zre — Pure Python ZRE (RFC 36) implementation."""
 
-from .node import Codec, Group, Peer, ZreNode
+from .gossip import GossipHub
+from .node import Codec, Group, Peer, UUIDCollisionError, ZreError, ZreNode
 
-__version__ = "0.1.2"
-__all__ = ["Codec", "Group", "Peer", "ZreNode"]
+__all__ = [
+    "Codec",
+    "GossipHub",
+    "Group",
+    "Peer",
+    "UUIDCollisionError",
+    "ZreError",
+    "ZreNode",
+]
+
+__version__ = "0.2.0"

@@ -17,15 +17,29 @@ import random
 import sys
 import time
 
-from zre import ZreNode
+from _common import (
+    CollisionExit,
+    add_uuid_arg,
+    check_collision_event,
+    exit_on_uuid_collision,
+)
+
+from zre import UUIDCollisionError, ZreNode
 
 STROKE_COLORS = ["red", "green", "blue", "black", "orange"]
 
 
 async def run_board(
-    peer_name: str, port: int, interface: str | None, verbose: bool, demo: bool
+    peer_name: str,
+    port: int,
+    interface: str | None,
+    verbose: bool,
+    demo: bool,
+    uuid_hex: str | None = None,
 ):
     node = ZreNode(f"board-{peer_name}")
+    if uuid_hex:
+        node.set_uuid(uuid_hex)
     node.set_header("X-ROLE", "whiteboard")
     node.set_header("X-PEER", peer_name)
     if port:
@@ -50,6 +64,7 @@ async def run_board(
 
     async def handle_events():
         async for event in node.events():
+            check_collision_event(event)
             etype = event["type"]
             if etype == "ENTER":
                 print(f"  >> {event.get('peer_name')} entered whiteboard")
@@ -132,6 +147,7 @@ def main():
     parser.add_argument("name", help="peer name")
     parser.add_argument("--port", type=int, default=15670)
     parser.add_argument("--interface", type=str, default=None)
+    add_uuid_arg(parser)
     parser.add_argument("--verbose", action="store_true")
     parser.add_argument(
         "--demo", action="store_true", help="auto-generate strokes (for testing)"
@@ -139,10 +155,16 @@ def main():
     args = parser.parse_args()
     try:
         asyncio.run(
-            run_board(args.name, args.port, args.interface, args.verbose, args.demo)
+            run_board(
+                args.name, args.port, args.interface, args.verbose, args.demo, args.uuid
+            )
         )
     except KeyboardInterrupt:
         print("\nInterrupted, shutting down...")
+    except CollisionExit:
+        sys.exit(3)
+    except UUIDCollisionError as exc:
+        sys.exit(exit_on_uuid_collision(exc))
 
 
 if __name__ == "__main__":
@@ -150,3 +172,7 @@ if __name__ == "__main__":
         main()
     except KeyboardInterrupt:
         print("\nInterrupted, shutting down...")
+    except CollisionExit:
+        sys.exit(3)
+    except UUIDCollisionError as exc:
+        sys.exit(exit_on_uuid_collision(exc))

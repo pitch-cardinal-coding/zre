@@ -26,11 +26,16 @@ the release notes unless you ask to remain anonymous.
 
 Things that are **by design** and therefore not vulnerabilities:
 
-- **ZRE traffic is not encrypted.** RFC 36 defines no transport crypto; group
-  (`SHOUT`) and direct (`WHISPER`) payloads travel in plaintext over TCP, and
-  beacons are plaintext UDP. Treat LANs as untrusted, or add encryption at the
-  application layer (see `examples/secure_chat.py` for a pattern using the
-  optional `secure` extra).
+- **ZRE traffic is plaintext unless you enable Curve.** RFC 36 defines no
+  transport crypto, so by default group (`SHOUT`) and direct (`WHISPER`)
+  payloads travel in plaintext over TCP, and beacons are plaintext UDP.
+  Call `set_zcert(public, secret)` + `set_zap_domain(domain)` on every
+  node (with a `zmq.auth` authenticator per process, since each node owns
+  its context) to get CurveZMQ-encrypted, ZAP-authenticated links —
+  secure nodes emit v3 beacons and refuse keyless peers. Treat LANs as
+  untrusted either way, or add application-layer encryption on top (see
+  `examples/secure_chat.py` for a pattern using the optional `secure`
+  extra).
 - **Beacon-based discovery is LAN-only and unauthenticated.** Any process that
   can send UDP packets to the beacon port can join the mesh and spoof peer
   names. This matches the RFC 36 threat model.

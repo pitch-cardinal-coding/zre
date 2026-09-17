@@ -6,7 +6,7 @@ getting a development environment running and submitting changes.
 ## Development setup
 
 ```bash
-# Create a virtualenv (any Python >= 3.9 works; tested on 3.14)
+# Create a virtualenv (any Python >= 3.10 works; tested on 3.14)
 python3 -m venv .venv
 source .venv/bin/activate
 
@@ -21,7 +21,7 @@ pip install -e .
 ## Running tests and lint
 
 ```bash
-make test      # pytest (65 tests)
+make test      # pytest (99 tests)
 make lint      # ruff check zre tests examples
 make format    # ruff format
 make ci        # check-format + lint + test
@@ -71,7 +71,7 @@ no API tokens involved:
    gate (Actions → the run → *Review deployments* → *Approve and deploy*).
    Releases do not upload until a maintainer approves.
 
-The workflow tests on Python 3.9/3.12/3.14, builds the sdist + wheel,
+The workflow tests on Python 3.10/3.12/3.14, builds the sdist + wheel,
 runs `twine check`, smoke-imports the wheel, then uploads to both
 TestPyPI and PyPI. Every push/PR to `main` also runs the test + build
 jobs without publishing.

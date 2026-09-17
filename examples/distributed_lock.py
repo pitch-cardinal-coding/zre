@@ -10,12 +10,20 @@ import argparse
 import asyncio
 import contextlib
 import json
+import sys
 import time
 import uuid
 from dataclasses import dataclass
 from enum import Enum
 
-from zre import ZreNode
+from _common import (
+    CollisionExit,
+    add_uuid_arg,
+    check_collision_event,
+    exit_on_uuid_collision,
+)
+
+from zre import UUIDCollisionError, ZreNode
 
 
 class LockState(Enum):
@@ -33,10 +41,12 @@ class LockRequest:
 
 
 class DistributedLock:
-    def __init__(self, node_name: str):
+    def __init__(self, node_name: str, uuid_hex: str | None = None):
         self.node_name = node_name
         self.node_id = f"lock-{node_name}"
         self.node = ZreNode(self.node_id)
+        if uuid_hex:
+            self.node.set_uuid(uuid_hex)
         self.node.set_header("X-ROLE", "lock-manager")
         self.lock_group = b"LOCKS"
         self.locks: dict[str, LockState] = {}
@@ -148,6 +158,7 @@ class DistributedLock:
 
         async def ev_loop():
             async for event in self.node.events():
+                check_collision_event(event)
                 await self.handle_message(event)
 
         try:
@@ -166,9 +177,10 @@ def main():
     parser.add_argument("node_name", help="node name")
     parser.add_argument("--port", type=int, default=15670)
     parser.add_argument("--interface", type=str, default=None)
+    add_uuid_arg(parser)
     parser.add_argument("--verbose", action="store_true")
     args = parser.parse_args()
-    lock = DistributedLock(args.node_name)
+    lock = DistributedLock(args.node_name, args.uuid)
 
     async def demo():
         run_task = asyncio.create_task(
@@ -197,6 +209,10 @@ def main():
         asyncio.run(demo())
     except KeyboardInterrupt:
         print("\nInterrupted, shutting down...")
+    except CollisionExit:
+        sys.exit(3)
+    except UUIDCollisionError as exc:
+        sys.exit(exit_on_uuid_collision(exc))
 
 
 if __name__ == "__main__":
@@ -204,3 +220,7 @@ if __name__ == "__main__":
         main()
     except KeyboardInterrupt:
         print("\nInterrupted, shutting down...")
+    except CollisionExit:
+        sys.exit(3)
+    except UUIDCollisionError as exc:
+        sys.exit(exit_on_uuid_collision(exc))

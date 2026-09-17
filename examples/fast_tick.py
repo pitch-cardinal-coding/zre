@@ -15,9 +15,17 @@ Usage:
 
 import argparse
 import asyncio
+import sys
 import time
 
-from zre import ZreNode
+from _common import (
+    CollisionExit,
+    add_uuid_arg,
+    check_collision_event,
+    exit_on_uuid_collision,
+)
+
+from zre import UUIDCollisionError, ZreNode
 
 
 async def main() -> None:
@@ -27,10 +35,13 @@ async def main() -> None:
     parser.add_argument("--interface", type=str, default=None)
     parser.add_argument("--interval-ms", type=int, default=10)
     parser.add_argument("--run-seconds", type=int, default=30)
+    add_uuid_arg(parser)
     parser.add_argument("--verbose", action="store_true")
     args = parser.parse_args()
 
     node = ZreNode("tick-" + args.role)
+    if args.uuid:
+        node.set_uuid(args.uuid)
     node.set_port(args.port)
     if args.interface:
         node.set_interface(args.interface)
@@ -44,6 +55,7 @@ async def main() -> None:
 
     async def watch() -> None:
         async for event in node.events():
+            check_collision_event(event)
             if isinstance(event, dict) and event.get("type") == "ENTER":
                 peer = str(event.get("peer_id", ""))[:8]
                 print(
@@ -63,4 +75,11 @@ async def main() -> None:
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        print("\nInterrupted, shutting down...")
+    except CollisionExit:
+        sys.exit(3)
+    except UUIDCollisionError as exc:
+        sys.exit(exit_on_uuid_collision(exc))

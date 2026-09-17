@@ -1,6 +1,6 @@
 # zre release pipeline (PyPI distribution: zre).
 #
-#   push/PR to main  ->  test (py3.9/3.12/3.14: ruff + pytest)  ->  build (sdist+wheel, twine check)
+#   push/PR to main  ->  test (py3.10/3.12/3.14: ruff + pytest)  ->  build (sdist+wheel, twine check)
 #   push of a v* tag ->  test -> build -> publish to PyPI via Trusted Publishing (OIDC, no tokens)
 #
 # One-time setup (per index): register the trusted publisher for project
@@ -41,7 +41,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python: ["3.9", "3.12", "3.14"]
+        python: ["3.10", "3.12", "3.14"]
+    env:
+      # Isolate the suite's UDP beacon port: runners and containers can
+      # host other ZRE-speaking services on the 15670 default, which the
+      # tests would otherwise discover as extra peers and fail cross-talk
+      # checks (tests/conftest.py maps the default to this port).
+      ZRE_TEST_PORT: 24190
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v7
@@ -54,7 +60,7 @@ jobs:
       - name: Ruff format check
         run: ruff format --check zre tests examples
       - name: Pytest
-        run: python -m pytest tests/ -v --tb=short
+        run: python -m pytest tests/ -v --tb=short -o faulthandler_timeout=180 -o faulthandler_exit_on_timeout=true
 
   build:
     name: build + verify dists

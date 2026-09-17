@@ -81,9 +81,6 @@ async def cleanup(*nodes_and_tasks):
         await n.stop()
 
 
-# Direct Connection Tests
-
-
 @pytest.mark.asyncio
 async def test_direct_connection_enter_event():
     """Direct connection emits ENTER event."""
@@ -162,9 +159,6 @@ async def test_direct_connection_already_connected():
         await cleanup(n1, t1, n2, t2)
 
 
-# Direct Connection + Messaging
-
-
 @pytest.mark.asyncio
 async def test_direct_connection_shout():
     """SHOUT works after direct connection."""
@@ -233,9 +227,6 @@ async def test_direct_connection_multiple_messages():
         await cleanup(n1, t1, n2, t2)
 
 
-# Direct + Beacon Hybrid
-
-
 @pytest.mark.asyncio
 async def test_direct_and_beacon_discovery():
     """Node discovered via beacon also receives direct connection."""
@@ -257,9 +248,6 @@ async def test_direct_and_beacon_discovery():
         assert len(n1.peers()) == peers_before, "Peer count unchanged"
     finally:
         await cleanup(n1, t1, n2, t2)
-
-
-# Direct Connection Failure Handling
 
 
 @pytest.mark.asyncio
@@ -288,9 +276,6 @@ async def test_direct_connection_invalid_port():
         assert len(n1.peers()) == 0, "FAIL2 should have no peers"
     finally:
         await cleanup(n1, t1)
-
-
-# Edge Cases
 
 
 @pytest.mark.asyncio

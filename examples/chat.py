@@ -9,6 +9,12 @@ Run multiple instances:
 
 All instances on the same LAN will discover each other automatically.
 Commands: type message + Enter to SHOUT, /w <peer_hex> <msg> to whisper.
+The <peer_hex> is the UUID printed in each instance's first line.
+
+Note: `X is quiet (heartbeat probe)` appears at most once per 20 s per
+peer — the node probes an idle peer every second, but the library only
+emits EVASIVE once per quiet episode. Only `X left the chat` (EXIT) means
+a peer actually went away.
 """
 
 import argparse
@@ -16,11 +22,27 @@ import asyncio
 import sys
 import uuid
 
-from zre import ZreNode
+from _common import (  # noqa: F401
+    CollisionExit,
+    add_uuid_arg,
+    check_collision_event,
+    exit_on_uuid_collision,
+    parse_uuid,
+)
+
+from zre import UUIDCollisionError, ZreNode
 
 
-async def chat_loop(name: str, port: int, interface: str | None, verbose: bool):
+async def chat_loop(
+    name: str,
+    port: int,
+    interface: str | None,
+    verbose: bool,
+    uuid_hex: str | None = None,
+):
     node = ZreNode(name)
+    if uuid_hex:
+        node.set_uuid(uuid_hex)
     if port:
         node.set_port(port)
     if interface:
@@ -39,6 +61,7 @@ async def chat_loop(name: str, port: int, interface: str | None, verbose: bool):
 
     async def event_printer():
         async for event in node.events():
+            check_collision_event(event)
             etype = event["type"]
             peer_name = event.get("peer_name", "?")
             if etype == "ENTER":
@@ -60,7 +83,9 @@ async def chat_loop(name: str, port: int, interface: str | None, verbose: bool):
                     pl = pl.decode("utf-8", errors="replace")
                 print(f"  {peer_name} (private): {pl}")
             elif etype == "EVASIVE":
-                print(f"  >> {peer_name} is evasive")
+                # Core rate-limits EVASIVE to once per quiet episode, so
+                # this prints at most once per 20 s while a peer idles.
+                print(f"  >> {peer_name} is quiet (heartbeat probe)")
 
     async def stdin_reader():
         reader = asyncio.StreamReader()
@@ -105,12 +130,19 @@ def main():
     parser.add_argument(
         "--interface", type=str, default=None, help="network interface or IP"
     )
+    add_uuid_arg(parser)
     parser.add_argument("--verbose", action="store_true", help="enable verbose logging")
     args = parser.parse_args()
     try:
-        asyncio.run(chat_loop(args.name, args.port, args.interface, args.verbose))
+        asyncio.run(
+            chat_loop(args.name, args.port, args.interface, args.verbose, args.uuid)
+        )
     except KeyboardInterrupt:
         print("\nInterrupted, shutting down...")
+    except CollisionExit:
+        sys.exit(3)
+    except UUIDCollisionError as exc:
+        sys.exit(exit_on_uuid_collision(exc))
 
 
 if __name__ == "__main__":
@@ -118,3 +150,7 @@ if __name__ == "__main__":
         main()
     except KeyboardInterrupt:
         print("\nInterrupted, shutting down...")
+    except CollisionExit:
+        sys.exit(3)
+    except UUIDCollisionError as exc:
+        sys.exit(exit_on_uuid_collision(exc))

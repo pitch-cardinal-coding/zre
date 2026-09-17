@@ -10,11 +10,19 @@ Usage:
 
 import argparse
 import asyncio
+import sys
 import time
 from dataclasses import dataclass, field
 from enum import Enum
 
-from zre import ZreNode
+from _common import (
+    CollisionExit,
+    add_uuid_arg,
+    check_collision_event,
+    exit_on_uuid_collision,
+)
+
+from zre import UUIDCollisionError, ZreNode
 
 
 class HealthStatus(Enum):
@@ -35,9 +43,11 @@ class PeerHealth:
 
 
 class HealthMonitor:
-    def __init__(self, node_name: str = "health-monitor"):
+    def __init__(self, node_name: str = "health-monitor", uuid_hex: str | None = None):
         self.node_name = node_name
         self.node = ZreNode(node_name)
+        if uuid_hex:
+            self.node.set_uuid(uuid_hex)
         self.node.set_header("X-ROLE", "health-monitor")
         self.peers: dict[str, PeerHealth] = {}
         self.status_callbacks: list = []
@@ -137,6 +147,7 @@ class HealthMonitor:
 
         async def ev_loop():
             async for event in self.node.events():
+                check_collision_event(event)
                 await self.handle_event(event)
 
         try:
@@ -159,9 +170,10 @@ def main():
     parser.add_argument("node_name", help="monitor node name")
     parser.add_argument("--port", type=int, default=15670)
     parser.add_argument("--interface", type=str, default=None)
+    add_uuid_arg(parser)
     parser.add_argument("--verbose", action="store_true")
     args = parser.parse_args()
-    mon = HealthMonitor(args.node_name)
+    mon = HealthMonitor(args.node_name, args.uuid)
     mon.register_status_callback(
         lambda peer, old: asyncio.create_task(status_callback(peer, old))
     )
@@ -169,6 +181,10 @@ def main():
         asyncio.run(mon.run(args.port, args.interface, args.verbose))
     except KeyboardInterrupt:
         print("\nInterrupted, shutting down...")
+    except CollisionExit:
+        sys.exit(3)
+    except UUIDCollisionError as exc:
+        sys.exit(exit_on_uuid_collision(exc))
 
 
 if __name__ == "__main__":
@@ -176,3 +192,7 @@ if __name__ == "__main__":
         main()
     except KeyboardInterrupt:
         print("\nInterrupted, shutting down...")
+    except CollisionExit:
+        sys.exit(3)
+    except UUIDCollisionError as exc:
+        sys.exit(exit_on_uuid_collision(exc))

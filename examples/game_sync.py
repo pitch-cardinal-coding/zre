@@ -11,10 +11,18 @@ import argparse
 import asyncio
 import contextlib
 import json
+import sys
 import time
 from dataclasses import asdict, dataclass
 
-from zre import ZreNode
+from _common import (
+    CollisionExit,
+    add_uuid_arg,
+    check_collision_event,
+    exit_on_uuid_collision,
+)
+
+from zre import UUIDCollisionError, ZreNode
 
 
 @dataclass
@@ -29,10 +37,12 @@ class PlayerState:
 
 
 class GameClient:
-    def __init__(self, player_name: str):
+    def __init__(self, player_name: str, uuid_hex: str | None = None):
         self.player_name = player_name
         self.player_id = f"player-{player_name}"
         self.node = ZreNode(f"game-{player_name}")
+        if uuid_hex:
+            self.node.set_uuid(uuid_hex)
         self.node.set_header("X-GAME", "demo")
         self.node.set_header("X-PLAYER", player_name)
         self.state = PlayerState(
@@ -82,6 +92,7 @@ class GameClient:
 
         async def ev_loop():
             async for event in self.node.events():
+                check_collision_event(event)
                 if event["type"] == "SHOUT" and event.get("group") == "GAME_WORLD":
                     await self._handle_game_message(event)
 
@@ -117,8 +128,10 @@ class GameClient:
 
 
 class GameServer:
-    def __init__(self):
+    def __init__(self, uuid_hex: str | None = None):
         self.node = ZreNode("game-server")
+        if uuid_hex:
+            self.node.set_uuid(uuid_hex)
         self.node.set_header("X-ROLE", "server")
         self.players: dict[str, dict] = {}
 
@@ -140,6 +153,7 @@ class GameServer:
 
         async def ev_loop():
             async for event in self.node.events():
+                check_collision_event(event)
                 if event["type"] == "SHOUT" and event.get("group") == "GAME_WORLD":
                     try:
                         payload = event.get("payload", b"")
@@ -166,24 +180,30 @@ def main():
     pc.add_argument("name", help="player name")
     pc.add_argument("--port", type=int, default=15670)
     pc.add_argument("--interface", type=str, default=None)
+    add_uuid_arg(pc)
     pc.add_argument("--verbose", action="store_true")
     ps = sub.add_parser("server", help="run server")
     ps.add_argument("--port", type=int, default=15670)
     ps.add_argument("--interface", type=str, default=None)
+    add_uuid_arg(ps)
     ps.add_argument("--verbose", action="store_true")
     args = parser.parse_args()
     if args.mode == "client":
-        client = GameClient(args.name)
+        client = GameClient(args.name, args.uuid)
         try:
             asyncio.run(client.run(args.port, args.interface, args.verbose))
         except KeyboardInterrupt:
             print("\nInterrupted, shutting down...")
+        except UUIDCollisionError as exc:
+            sys.exit(exit_on_uuid_collision(exc))
     else:
-        server = GameServer()
+        server = GameServer(args.uuid)
         try:
             asyncio.run(server.run(args.port, args.interface, args.verbose))
         except KeyboardInterrupt:
             print("\nInterrupted, shutting down...")
+        except UUIDCollisionError as exc:
+            sys.exit(exit_on_uuid_collision(exc))
 
 
 if __name__ == "__main__":
@@ -191,3 +211,7 @@ if __name__ == "__main__":
         main()
     except KeyboardInterrupt:
         print("\nInterrupted, shutting down...")
+    except CollisionExit:
+        sys.exit(3)
+    except UUIDCollisionError as exc:
+        sys.exit(exit_on_uuid_collision(exc))

@@ -2,7 +2,7 @@
 
 [![PyPI](https://img.shields.io/pypi/v/zre.svg)](https://pypi.org/project/zre/)
 [![Python versions](https://img.shields.io/pypi/pyversions/zre.svg)](https://pypi.org/project/zre/)
-[![License: MIT](https://img.shields.io/pypi/l/zre.svg)](LICENSE)
+[![License: MIT](https://img.shields.io/pypi/l/zre.svg)](docs/LICENSE)
 [![CI](https://github.com/pitch-cardinal-coding/zre/actions/workflows/release.yml/badge.svg)](https://github.com/pitch-cardinal-coding/zre/actions/workflows/release.yml)
 
 > **ZRE** implements the [ZeroMQ Realtime Exchange Protocol (RFC 36)](https://rfc.zeromq.org/spec/36/) for peer-to-peer discovery and messaging. No brokers, no servers — peers find each other on the LAN with zero configuration, or dial each other directly across subnets by address.
@@ -12,16 +12,20 @@
 | Feature | Description |
 |---------|-------------|
 | **Zero-configuration** | No central servers, brokers, or admin |
-| **Peer discovery** | Automatic via UDP broadcast beacons (port 15670), or direct dial via `connect_peer(host, port)` where broadcasts can't reach |
-| **Group messaging** | Join/leave named groups, multicast via unicast |
+| **Peer discovery** | Automatic via UDP broadcast beacons (port 15670), direct dial via `connect_peer(host, port)` where broadcasts can't reach, or UDP-free gossip hub (`gossip_bind` / `gossip_connect`, `python3 -m zre.gossip`) |
+| **Group messaging** | Join/leave named groups, multicast via unicast; per-group leader elections with `LEADER` events |
+| **Transport security** | Optional CurveZMQ + ZAP (`set_zcert`, `set_zap_domain`) with v3 beacons |
 | **Direct messaging** | Whisper to individual peers |
+| **Stable peer ids** | Optional fixed UUID (`set_uuid`) so `peer_hex` survives restarts |
 | **Heartbeating** | Automatic detection of peers going evasive, silent, or dead |
 | **Language neutral** | Speaks RFC 36 on the wire — interoperates with any compliant peer |
 | **Pure Python** | Single asyncio event loop, no threads, no C extensions |
 
+Wire conformance details: [docs/PROTOCOL.md](docs/PROTOCOL.md).
+
 ## Installation
 
-Requires Python 3.9+ on Linux or macOS.
+Requires Python 3.10+ on Linux or macOS.
 
 ```bash
 pip install zre
@@ -45,19 +49,6 @@ pip install -e .[dev]     # + development tools
 ```
 
 `requirements.txt` carries pinned versions of the dependency stack for reproducible environments; it is not needed for a normal install.
-
-## Optional tools (for examples and profiling)
-
-The `zre` core needs only `pyzmq` (and `cryptography` for `secure_chat`). Everything below is **optional**, but required to run some examples or the profiling helpers:
-
-| Tool | Needed for | Install if missing (Ubuntu/Debian) | Behavior if missing |
-|------|------------|------------------------------------|---------------------|
-| `mpv` / `vlc` | Playing `examples/media_stream.py` output | `sudo apt update && sudo apt install -y mpv` | `media_stream.py` still saves to `--out`; play the file afterwards |
-| `ffmpeg` | Re-muxing media for true live fragmented-mp4 playback | `sudo apt install -y ffmpeg` | `media_stream.py` still works for non-fragmented mp4s (player buffers until `MEDIA_END`) |
-| `py-spy` | `py-spy-watch-tests.sh` / `run_tests_with_monitor.sh` RSS + stack dumps | `pip install py-spy` | Watcher logs RSS via `ps` only and skips stack dumps |
-| `tmux` | `make demo-*` isolated panes | `sudo apt install -y tmux` | Run examples directly in separate terminals instead |
-
-> **Protocol conformance (RFC 36):** UDP beacon `ZRE\x01` + 16-byte UUID + 2-byte port (22 B), `HELLO/SHOUT/WHISPER/JOIN/LEAVE/PING/PING_OK` with `0xAAA1`/`v2`/`seq`, `Dealer` identity `0x01+uuid`, `Router` mandatory, `EVASIVE`/`EXPIRED` timers, `X-` headers. **Implementation notes:** `asyncio` single loop, `pyzmq` `NOBLOCK` instead of `zmq.asyncio`, per-peer `want_seq` lenient update (not drop) for `HELLO-before-JOIN` race, `HELLO` back on `ENTER` for mutual readiness, `SO_REUSEPORT` + `SO_BROADCAST` + loopback beacons for single-host tests, `ZreNode.set_*` before `start()` with validation, robust `Codec.decode` bounds checks.
 
 ## Quick Start
 
@@ -85,411 +76,160 @@ async def main():
 
 
 asyncio.run(main())
-# Or for chat: see examples/chat.py for stdin loop + node.run() gather pattern
 ```
-
-## Scenarios & Use Cases
-
-### 🏠 Local Network Applications
-- **Local service discovery** — Services announce themselves on LAN without central registry
-- **Clustering services** — Microservices discover each other on same network
-- **Smart home automation** — Devices discover and coordinate locally
-- **Local chat/messaging** — LAN chat without internet
-
-### 🤖 IoT & Embedded
-- **IoT device coordination** — Sensors/actuators discover and coordinate
-- **Sensor networks** — Distributed sensor data aggregation
-- **Robot swarms** — Coordinated robot behaviors
-- **Edge computing clusters** — Edge devices forming ad-hoc clusters
-
-### 🎮 Real-time Applications
-- **Multiplayer gaming** — LAN multiplayer without central server
-- **Real-time collaboration** — Whiteboards, editors, shared tools
-- **Live streaming** — Local audience interaction
-- **AR/VR multi-user** — Shared augmented/virtual reality sessions
-
-### 🏢 Enterprise & DevOps
-- **Service mesh** — Lightweight service discovery for containers
-- **Distributed task queues** — Workers discovering coordinators
-- **Configuration sync** — Distributed configuration propagation
-- **Health monitoring** — Peer health/status propagation
-
-### 🔬 Research & Testing
-- **Protocol research** — ZRE/RFC 36 experimentation
-- **Network simulation** — Testing mesh network behaviors
-- **Distributed systems teaching** — Educational demonstrations
-- **Chaos engineering** — Testing partition tolerance
-
-### 🌐 Specialized Scenarios
-- **Disaster recovery** — Communication when infrastructure fails
-- **Offline-first apps** — Works without internet connectivity
-- **Air-gapped networks** — Secure environments without internet
-- **Event venues** — Conferences, festivals, stadiums
-- **Vehicle-to-vehicle** — V2X communication (cars, drones)
-
-### Scenario → Example Mapping
-
-| Scenario | Example | Command | What it proves |
-|----------|---------|---------|----------------|
-| Local chat, event venues, offline-first | `chat.py` | `python3 examples/chat.py alice --port 15670` | SHOUT + WHISPER + ENTER/EXIT |
-| Service discovery, clustering, service mesh | `service_discovery.py` | `python3 examples/service_discovery.py registry --port 15670` | X-ROLE headers + ENTER |
-| IoT sensor data | `sensor_network.py` | `python3 examples/sensor_network.py aggregator --port 15670` | SHOUT to SENSORS group, JSON payloads |
-| P2P file share, media streaming | `file_transfer.py`, `media_stream.py` | `python3 examples/file_transfer.py send <peer> <file> --port 15670` / `python3 examples/media_stream.py send --file <file> --port 15670` | WHISPER 64 KiB + SHOUT broadcast |
-| Distributed task queues | `task_queue.py` | `python3 examples/task_queue.py coordinator --port 15670` / `worker w1 --port 15670` | SHOUT tasks + WHISPER results |
-| Real-time whiteboard | `whiteboard.py` | `python3 examples/whiteboard.py alice --port 15670 --demo` | SHOUT JSON strokes |
-| Presence, smart home | `presence.py` | `python3 examples/presence.py alice --port 15670` | ENTER/EXIT/EVASIVE table, no group needed |
-| Multiplayer game | `game_sync.py` | `python3 examples/game_sync.py server --port 15670` | 20 Hz SHOUT state sync |
-| Config sync | `config_sync.py` | `python3 examples/config_sync.py node-1 --port 15670` | SHOUT + version vectors |
-| Health monitoring | `health_monitor.py` | `python3 examples/health_monitor.py monitor --port 15670` | EVASIVE/EXIT tracking |
-| Distributed lock | `distributed_lock.py` | `python3 examples/distributed_lock.py node-1 --port 15670` | SHOUT + WHISPER grant |
-| Encrypted chat | `secure_chat.py` | `python3 examples/secure_chat.py alice --port 15670` | ChaCha20 via cryptography |
-| Benchmark & scale | `benchmark.py` | `python3 examples/benchmark.py scalability --port 5840` | 20-node mesh in 0.20 s (see Performance) |
 
 ## API Overview
 
 ```python
-import asyncio
-from zre import ZreNode, Codec, Peer, Group
+node = ZreNode("my-node")  # name optional (random otherwise)
 
-# Create node (name optional)
-node = ZreNode("my-node")
-
-# Set custom headers (shared during discovery via HELLO)
+# Headers shared with peers during discovery (HELLO)
 node.set_header("X-ROLE", "worker")
-node.set_header("X-VERSION", "1.0")
 
-# All config before start (see Configuration)
-node.set_port(15670)
+# Configuration — all of it BEFORE start()
+node.set_port(15670)  # UDP beacon port (cluster isolation)
+node.set_interface("eth0")  # pin NIC (or an IP) on multi-homed hosts
+node.set_interval(1000)  # beacon interval, ms
+node.set_evasive_timeout(5000)  # peer quiet -> EVASIVE probes, ms
+node.set_silent_timeout(5000)  # alias of the evasive timeout
+node.set_expired_timeout(30000)  # peer silent -> removed, ms
+node.set_beacon_peer_port(9999)  # fixed TCP ROUTER port (default ephemeral)
+node.set_advertised_endpoint("tcp://203.0.113.50:9999")  # NAT setups
+node.set_uuid("32-char-hex-or-16-bytes")  # stable peer id (default random)
+node.set_ipv6(True)  # enable IPv6 on TCP sockets (beacon stays IPv4)
+node.set_zcert(public_key, secret_key)  # CurveZMQ transport crypto (32 B / z85)
+node.set_zap_domain("global")  # ZAP domain for Curve clients
+node.set_contest_in_group("WORKERS")  # opt into group-leader elections
+node.set_verbose()  # wire-level logging
 
-await node.start()
+# Duplicate-uuid guard: if another node with the same stable uuid is live
+# on the network, run() raises zre.UUIDCollisionError and the node shuts
+# itself down (stable uuids must be unique among concurrently running peers).
 
-# CRITICAL: run beacon/ROUTER loop concurrently — handles UDP beacons, HELLO, JOIN, WHISPER, SHOUT, PING, reap
-run_task = asyncio.create_task(node.run())
-await asyncio.sleep(0.5)  # let beacon discovery start
+await node.start()  # bind ROUTER + beacon socket
+run_task = asyncio.create_task(node.run())  # REQUIRED: drive the node
 
-# Join groups after discovery started (avoids JOIN-before-HELLO seq race)
-await node.join("CHAT")
-await node.join("NOTIFICATIONS")
+await node.join("CHAT")  # / leave(group)
+await node.shout("CHAT", b"hi all")  # group message
+await node.shouts("CHAT", "hi all")  # same, str convenience
+await node.whisper(peer_hex, b"hi")  # direct message (peer id = UUID hex)
+await node.whispers(peer_hex, "hi")  # same, str convenience
+await node.connect_peer("10.0.0.7", 9999)  # direct dial, no beacons
+await node.connect_peer("10.0.0.7", 9999, public_key=peer_key)  # Curve dial
 
-# Event loop — yields ENTER, EXIT, JOIN, LEAVE, SHOUT, WHISPER, EVASIVE
-async for event in node.events():
-    if event["type"] == "ENTER":
-        print(f"{event['peer_name']} joined")
-        await node.shout("CHAT", b"Hello everyone!")
-        await node.whisper(event["peer_id"], b"Private hello")
-    elif event["type"] == "SHOUT":
-        print(f"{event['peer_name']}: {event['payload']}")
+node.gossip_bind("tcp://0.0.0.0:15671")  # host a discovery hub (no beacons)
+node.gossip_connect("tcp://10.0.0.7:15671")  # join one (UDP-free mesh)
+# or: python3 -m zre.gossip --port 15671  (standalone hub)
 
-# Cleanup
+async for event in node.events():  # or: event = await node.recv(timeout=1.0)
+    ...
+node.peers()  # list of peer UUID hexes
+node.own_groups()  # groups this node joined
+node.peers_by_group("CHAT")  # peer ids in a group
+node.peer_groups()  # all groups known through peers
+node.peer_address(peer_hex)  # peer endpoint ("" when unknown)
+node.peer_header_value(peer_hex, "X-ROLE")  # one peer header (None when missing)
+
 run_task.cancel()
-await asyncio.gather(run_task, return_exceptions=True)
 await node.stop()
 ```
 
-> **Validated:** every method above (`set_header`, `set_port`, `set_interface`, `set_interval`, `set_evasive_timeout`, `set_expired_timeout`, `set_beacon_peer_port`, `set_advertised_endpoint`, `set_verbose`, `start`, `run`, `join`, `leave`, `shout`, `whisper`, `connect_peer`, `events`, `recv`, `peers`, `own_groups`, `stop`) is tested in `tests/test_lan.py` and `tests/test_wan.py` and in all examples with `--help` and live runs.
-
-## Event Types
+### Event types
 
 | Event | Description | Fields |
 |-------|-------------|--------|
 | `ENTER` | New peer discovered | `peer_id`, `peer_name`, `address` |
 | `EXIT` | Peer left network | `peer_id`, `peer_name` |
-| `JOIN` | Peer joined group | `peer_id`, `peer_name`, `group` |
-| `LEAVE` | Peer left group | `peer_id`, `peer_name`, `group` |
+| `JOIN` / `LEAVE` | Peer joined/left group | `peer_id`, `peer_name`, `group` |
 | `SHOUT` | Group message | `peer_id`, `peer_name`, `group`, `payload` |
 | `WHISPER` | Direct message | `peer_id`, `peer_name`, `payload` |
-| `EVASIVE` | Peer unresponsive | `peer_id`, `peer_name` |
+| `EVASIVE` | Peer went quiet (probing started; emitted once per quiet episode, at most every 20 s — an idle-but-alive peer answers the probe and stays) | `peer_id`, `peer_name` |
+| `LEADER` | Group election converged (lowest contestant id wins; lone contestant leads itself) | `peer_id`, `peer_name`, `group` |
+| `COLLISION` | Another node with this node's stable uuid is live on the network; the node emits this, then stops itself | `detail` |
 
-## Configuration
-
-All configuration must be set **before** calling `start()`:
-
-```python
-node = ZreNode("my-node")
-
-# Network interface (if multiple NICs)
-node.set_interface("eth0")  # or "192.168.1.100"
-
-# UDP beacon port (default: 15670)
-node.set_port(5671)  # different port for separate clusters
-
-# Beacon interval (default: 1000ms)
-node.set_interval(250)  # broadcast every 250ms
-
-# Timeout settings (milliseconds)
-node.set_evasive_timeout(5000)  # peer considered evasive
-node.set_expired_timeout(30000)  # peer considered dead
-
-# Fixed TCP port for ROUTER socket
-node.set_beacon_peer_port(9999)
-
-# Public endpoint told to peers in HELLO (NAT/port-forward setups)
-node.set_advertised_endpoint("tcp://203.0.113.50:9999")
-
-# Verbose logging
-node.set_verbose()
-```
-
-## Architecture
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                      ZreNode (asyncio)                      │
-├─────────────────────────────────────────────────────────────┤
-│  ┌──────────┐  ┌──────────┐  ┌──────────┐                  │
-│  │  UDP     │  │  ROUTER  │  │  API     │                  │
-│  │  Beacon  │  │  Socket  │  │  Queue   │                  │
-│  │  (port   │  │  (TCP    │  │  (join/  │                  │
-│  │  15670)   │  │  ephemeral)│  │  leave)  │                  │
-│  └────┬─────┘  └────┬─────┘  └────┬─────┘                  │
-│       │             │             │                         │
-│       ▼             ▼             ▼                         │
-│  ┌─────────────────────────────────────┐                   │
-│  │         asyncio Event Loop          │                   │
-│  └─────────────────────────────────────┘                   │
-└─────────────────────────────────────────────────────────────┘
-```
-
-- **Single asyncio event loop** — No threads, no race conditions
-- **zmq.Context (sync)** with `zmq.NOBLOCK` — Non-blocking I/O without `zmq.asyncio`
-- **UDP beacon** — Non-blocking socket + `asyncio` for scheduling
-- **poll(inbox | beacon | api) loop** with timeout, then process ready socket
+`EXIT` is the only reliable "peer is gone" signal. `COLLISION` is emitted
+before `run()` raises `zre.UUIDCollisionError`, and `events()` keeps
+draining until the queue is empty so late consumers still receive it.
 
 ## Examples
 
-See the [`examples/`](./examples/) directory. All examples support `--port`, `--interface`, `--verbose`, and `--help`:
+The [`examples/`](examples/README.md) directory contains 16 runnable
+scenario demos — chat, encrypted chat, file transfer, media streaming,
+sensor networks, task queues, service discovery, distributed locks, game
+sync, benchmarks, and more.
 
-| Example | Description | Verified Command |
-|---------|-------------|------------------|
-| [`chat.py`](examples/chat.py) | Interactive chat room | `python3 examples/chat.py alice --port 15670` |
-| [`service_discovery.py`](examples/service_discovery.py) | Service registry pattern | `python3 examples/service_discovery.py registry --port 15670` / `service my-svc api 8080 --port 15670` / `client --port 15670` |
-| [`fast_tick.py`](examples/fast_tick.py) | 10ms beacon tick demo | `python3 examples/fast_tick.py --role registry --port 14056` (single box: drop `--interface` on both ends; pin it on multi-homed hosts) |
-| [`file_transfer.py`](examples/file_transfer.py) | P2P file sharing | `python3 examples/file_transfer.py receive ./out --port 15670` / `send <peer_hex> <file> --port 15670` |
-| [`sensor_network.py`](examples/sensor_network.py) | IoT sensor data aggregation | `python3 examples/sensor_network.py aggregator --port 15670` / `sensors --port 15670` |
-| [`game_sync.py`](examples/game_sync.py) | Multiplayer game state sync | `python3 examples/game_sync.py server --port 15670` / `client Alice --port 15670` |
-| [`distributed_lock.py`](examples/distributed_lock.py) | Distributed locking | `python3 examples/distributed_lock.py node-1 --port 15670` |
-| [`config_sync.py`](examples/config_sync.py) | Distributed config propagation | `python3 examples/config_sync.py node-1 --port 15670` |
-| [`health_monitor.py`](examples/health_monitor.py) | Peer health monitoring | `python3 examples/health_monitor.py monitor-1 --port 15670` |
-| [`secure_chat.py`](examples/secure_chat.py) | Encrypted messaging | `python3 examples/secure_chat.py alice --port 15670` (requires `cryptography`) |
-| [`benchmark.py`](examples/benchmark.py) | Performance benchmarking | `python3 examples/benchmark.py discovery --nodes 5 --port 15670` |
-| [`task_queue.py`](examples/task_queue.py) | Distributed task queue | `python3 examples/task_queue.py coordinator --port 15670` / `worker w1 --port 15670` |
-| [`whiteboard.py`](examples/whiteboard.py) | Collaborative whiteboard | `python3 examples/whiteboard.py alice --port 15670 --demo` |
-| [`presence.py`](examples/presence.py) | Presence tracker | `python3 examples/presence.py alice --port 15670` |
-| [`media_stream.py`](examples/media_stream.py) | Media streaming | `python3 examples/media_stream.py send --file ./sample.mp4 --port 15670` / `recv --out ./media_out --port 15670` |
-| [`wan_direct.py`](examples/wan_direct.py) | Direct cross-subnet connection | `python3 examples/wan_direct.py remote --listen-port 19870 --port 19871` / `local --peer <host>:19870 --send "Hello WAN!" --wait 30` |
+**Start with the [examples testing guide](examples/README.md)** — a
+step-by-step, zero-assumptions walkthrough: install, pick a free port,
+run each example in order with exact commands and the output you should
+see, plus two-machine and cross-subnet (WAN) recipes and a
+troubleshooting table.
 
-Each example validates args via `argparse` and prints `--help` on error. Use `--port` to isolate clusters (e.g., 5671 for tests, 15670 for demos).
-
-## Direct Connection (WAN)
-
-UDP beacons do not cross routers, so beacon discovery is LAN-only by design.
-When you know a peer's address, bypass beacons entirely:
+Direct connection across subnets (beacons cannot cross routers):
 
 ```python
-node = ZreNode("local")
-await node.start()
-run_task = asyncio.create_task(node.run())
-
-await node.connect_peer("192.168.122.87", 19870)  # TCP + HELLO, no beacon needed
-await node.join("CHAT")
-await node.shout("CHAT", b"Hello WAN!")
+await node.connect_peer("192.168.122.87", 19870)  # TCP + HELLO, no beacon
 ```
 
-After the HELLO exchange the peer behaves exactly like a beacon-discovered
-one (`ENTER`, then `JOIN`/`SHOUT`/`WHISPER`/`LEAVE`, plus `EVASIVE` heartbeats).
-While the handshake is still in flight the peer stays out of `peers()`:
-a dial that never answers expires quietly with no phantom `ENTER`/`EXIT`,
-and repeat HELLOs from a live peer only refresh it — they can never restart
-the handshake or storm the event queue.
-Pin the far side to a stable TCP port so clients can dial it:
-
-```python
-node = ZreNode("remote")
-node.set_beacon_peer_port(19870)  # fixed ROUTER port instead of ephemeral
-```
-
-Behind NAT/port-forwarding, tell peers your public address (it is sent in
-`HELLO` instead of the auto-detected local one):
-
-```python
-node.set_advertised_endpoint("tcp://203.0.113.50:19870")
-```
-
-> **Proven:** `examples/wan_direct.py` was validated across subnets with no
-> shared broadcast domain — both sides logged `ENTER` + `JOIN`, the `SHOUT`
-> arrived intact, and `LEAVE` + `EVASIVE` heartbeats behaved normally, ending
-> in `EXIT` on expiry. Local coverage lives in `tests/test_wan.py` (18 tests:
-> ENTER, bidirectional, no-beacon, idempotent reconnect, SHOUT, WHISPER,
-> multi-message, beacon+direct hybrid, refused/invalid/unresolvable targets,
-> simultaneous connect, LEAVE, duplicate-HELLO storm guard, advertised-endpoint
-> validation).
-
-## Monitoring & Debugging
-
-```bash
-# Run tests with memory/performance monitoring (requires py-spy)
-./run_tests_with_monitor.sh
-# uses python3 -m pytest tests/ -v
-# and monitors RSS via py-spy every 0.25s, dumps via sudo py-spy every 30s
-
-# Monitor specific test (custom intervals)
-./py-spy-watch-tests.sh 0.25 /tmp/zre-py-spy-watch.log 30 &
-python3 -m pytest tests/test_lan.py -v
-# log at /tmp/zre-py-spy-watch.log
-
-# Lint/format checks
-make lint          # ruff check zre tests examples
-make check-format  # ruff format --check
-make format        # ruff format
-make ci            # check-format + lint + test
-
-# Memory profiling with memray (optional)
-PYTHONPATH=zre python3 -m memray run -o /tmp/zre-mem.bin examples/service_discovery.py registry --port 15670
-python3 -m memray summary /tmp/zre-mem.bin
-python3 -m memray stats /tmp/zre-mem.bin
-```
-
-### Tmux-Isolated Demos
-
-Each demo spawns server + clients in split panes (session `zre-demo-*`):
-
-```bash
-# Chat with 3 peers
-make demo-chat
-# Service discovery (registry + service + client)
-make demo-discovery
-# Sensor network (aggregator + sensors)
-make demo-sensor
-# Benchmark discovery
-make demo-benchmark
-
-# Manual tmux (equivalent):
-tmux new-session -d -s zre-demo-chat "python3 examples/chat.py alice --port 15670"
-tmux split-window -h -t zre-demo-chat "python3 examples/chat.py bob --port 15670"
-tmux split-window -v -t zre-demo-chat:0.1 "python3 examples/chat.py charlie --port 15670"
-tmux attach -t zre-demo-chat  # detach with Ctrl-b d, kill with tmux kill-session -t zre-demo-chat
-
-# Guide for any example:
-# 1. Pick a beacon port (15670 default, 5671 for isolated test)
-# 2. Start peers in separate panes: python3 examples/<ex> <args> --port <port>
-# 3. Observe ENTER/JOIN/SHOUT/WHISPER/EXIT events
-```
-
-## Interoperability
-
-Speaks ZRE RFC 36 on the wire (UDP beacon + `HELLO/SHOUT/WHISPER/JOIN/LEAVE/PING/PING_OK`),
-so it interoperates with any other RFC 36 peer on the same network.
-
-## Protocol Details (RFC 36)
-
-### UDP Beacon (22 bytes)
-```
-+---+---+---+------+ +------+------+
-| Z | R | E | 0x01 | | UUID | port |
-+---+---+---+------+ +------+------+
-  Header              Body
-```
-
-### TCP Message Format
-```
-+--------+---------+---------+----------+------+
-| 0xAA   | 0xA1    | version | sequence | ...  |
-+--------+---------+---------+----------+------+
-  Signature  Cmd     Proto v2  Cyclic seq
-```
-
-Commands: `HELLO(1)`, `WHISPER(2)`, `SHOUT(3)`, `JOIN(4)`, `LEAVE(5)`, `PING(6)`, `PING_OK(7)`
+The far side pins a stable port with `set_beacon_peer_port(19870)`;
+behind NAT, advertise your public address with
+`set_advertised_endpoint("tcp://PUBLIC_IP:19870")`. After the HELLO
+exchange the dialed peer is indistinguishable from a beacon-discovered
+one. See [`examples/wan_direct.py`](examples/wan_direct.py) for a
+runnable both-directions demo and [`docs/PROTOCOL.md`](docs/PROTOCOL.md)
+for the handshake rules (no phantom peers, duplicate-HELLO storm guard).
 
 ## Testing
 
 ```bash
-# Run all tests
-python3 -m pytest tests/ -v
-make test          # same, via Makefile
-make test-monitor  # with RSS/py-spy monitor
-
-# With monitoring
-./run_tests_with_monitor.sh
-
-# Specific test
-python3 -m pytest tests/test_lan.py::test_two_node_discovery -v
-
-# Lint & format
-make lint
-make check-format
-make ci
+python3 -m pytest tests/ -v        # protocol + feature coverage (99 tests)
+make test                          # same, via Makefile
+make ci                            # format + lint + tests
 ```
 
-## Performance
-
-| Metric | Validated Value | Method |
-|--------|-----------------|--------|
-| Memory per node | **28–29 MB RSS** (stable over 15 s) | `ps` + `/proc/<pid>/status VmRSS` on 4× `chat.py` in tmux |
-| Discovery 5 nodes | **0.10 s** | `benchmark.py discovery --nodes 5` |
-| Discovery 10 nodes | **0.10 s** | `benchmark.py discovery --nodes 10` |
-| Discovery 15 nodes | **0.20 s** | `benchmark.py scalability` |
-| Discovery 20 nodes | **0.20 s** | `benchmark.py scalability` |
-| Throughput | **178–179 messages/s, 1.5 Mb/s** (500–1000 msgs × 1 KiB) | `benchmark.py throughput --msgs 1000 --size 1024` |
-| Round-trip latency | **mean 15.37 ms, p50 17.03 ms, p99 18.35 ms** (0/100 lost) | `benchmark.py latency --pings 100` |
-| Max peers tested | **20 nodes** (full mesh) | `benchmark.py scalability` + `pytest test_ten_node_mesh` |
-| Groups per node | No implementation-imposed limit (bounded only by available memory) | `ZreNode.join()` |
-| Memory leak | **0 kB growth** over 15 s per node | `py-spy-watch-tests.sh` + live `ps` sampling |
-| 10ms tick discovery | **ENTER 0.00–2.57 s** both ends pinned, single-digit CPU | `fast_tick.py` across two hosts with pinned NICs |
-
-### Validation methodology
-
-All numbers above come from real runs (no mocks) on Python 3.14, using
-`tmux` to isolate each peer in its own pane/process, and `py-spy` (0.5 s RSS
-polling) plus `ps`/`/proc/<pid>/status` (`VmRSS`) for memory sampling.
-Representative receipts:
-
-```text
-$ python3 examples/benchmark.py discovery --nodes 5 --port 5780
-=== Discovery Benchmark: 5 nodes (port 5780) ===
-All 5 nodes discovered each other in 0.10s
-
-$ python3 examples/benchmark.py scalability --port 5840
-=== Scalability Benchmark ===
---- Testing 5 nodes  — 0.10s
---- Testing 10 nodes — 0.10s
---- Testing 15 nodes — 0.20s
---- Testing 20 nodes — 0.20s
-
-$ python3 examples/benchmark.py throughput --msgs 1000 --size 1024 --port 5782
-=== Throughput Benchmark: 1000 msgs x 1024 bytes (port 5782) ===
-Sent 1000 messages in 5.59s
-Throughput: 179 messages/s, 1.5 Mb/s
-
-$ python3 examples/benchmark.py latency --pings 100 --port 5783
-=== Latency Benchmark: 100 pings (port 5783) ===
-Latency (ms): min=11.47, max=18.35, mean=15.37, p50=17.03, p99=18.35
-Lost: 0/100
-```
-
-> **Throughput context:** 178 messages/s × 1 KiB = 1.5 Mb/s wire throughput.
-> This is expected for a full mesh — the O(n²) fan-out is the bottleneck, not
-> ZeroMQ: effective per-node send is 178 × (n−1) messages/s (3,382 internal
-> messages/s per node at 20 peers).
-
-**Memory:** 4 concurrent `chat.py` nodes held a steady **28.8–29.0 MB RSS
-each** across a 15-second sampling window (0 kB growth per node), and a
-throughput run stayed flat at **~7.6 MB RSS for 30 consecutive samples**.
-If there were a leak, RSS would climb second over second; it does not.
-
-Reproduce any of it yourself:
+On machines where another ZRE-speaking service already owns UDP 15670,
+isolate the suite:
 
 ```bash
-python3 -m pytest tests/ -v
-./py-spy-watch-tests.sh 0.25 /tmp/zre-py-spy-watch.log 30 &
-make test
-tail -20 /tmp/zre-py-spy-watch.log
+ZRE_TEST_PORT=24190 python3 -m pytest tests/ -q
 ```
+
+### Cross-network smoke test
+
+`scripts/cross_smoke.py` runs **every example between two machines, in both
+role directions**, verifying chat delivery, file/media sha256, and WAN
+dialing — the same matrix used to validate the examples:
+
+```bash
+# on machine A (local), against machine B over ssh:
+python3 scripts/cross_smoke.py --peer user@B --password SECRET \
+    --remote-dir '~/checkout' --host-iface virbr0 \
+    --first-addr 192.168.122.1      # A's IP as seen by B (enables wan_direct)
+```
+
+Select subsets with `--groups lan,coord,data,wan` or `-k name`; use
+`--base-port` to pick free UDP ports (15 consecutive + 1 TCP at +200 are
+checked at preflight). Or via make:
+
+```bash
+make cross-smoke PEER=user@B PASSWORD=SECRET HOST_IFACE=virbr0 FIRST_ADDR=192.168.122.1
+```
+
+## Documentation
+
+| Document | Contents |
+|----------|----------|
+| [examples/README.md](examples/README.md) | Step-by-step guide to every example (start here) |
+| [docs/PROTOCOL.md](docs/PROTOCOL.md) | RFC 36 wire format, beacon/message layouts, conformance notes |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Event-loop design and internal structure |
+| [docs/SCENARIOS.md](docs/SCENARIOS.md) | Use-case catalog mapped to examples |
+| [docs/BENCHMARKS.md](docs/BENCHMARKS.md) | Performance results, receipts, methodology |
+| [docs/MONITORING.md](docs/MONITORING.md) | py-spy/memray profiling, lint/CI, tmux demos |
 
 ## License
 
-MIT — see [LICENSE](LICENSE). For contributing, changelog, and security
-reporting, see [CONTRIBUTING.md](CONTRIBUTING.md), [CHANGELOG.md](CHANGELOG.md),
-and [SECURITY.md](SECURITY.md).
+MIT — see [docs/LICENSE](docs/LICENSE). For contributing, changelog, and security
+reporting, see [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md), [docs/CHANGELOG.md](docs/CHANGELOG.md),
+and [docs/SECURITY.md](docs/SECURITY.md).
 
 ## References
 
@@ -498,4 +238,6 @@ and [SECURITY.md](SECURITY.md).
 
 ---
 
-**Status**: Production-ready — 65/65 tests passing
+**Status**: Production-ready — 99 tests passing, all 18
+examples verified live on two machines across subnets in both directions
+(`scripts/cross_smoke.py`, 36/36).

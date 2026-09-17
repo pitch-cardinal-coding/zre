@@ -1,24 +1,22 @@
 #!/usr/bin/env python3
-"""Direct (WAN) peer connection — dial by address, no LAN beacons needed.
+"""UDP-free mesh via a gossip hub — discovery without LAN beacons.
 
-Two roles, same script. Beacons still run locally but discovery
-goes through an explicit address, so peers find each other across
-subnets where UDP broadcast cannot travel.
+Two roles, same script. Use where UDP broadcast cannot travel (cloud
+VPCs, containers, WAN links): one well-known hub relays endpoint
+announcements, and every node finds every other node through it.
 
-Stable side (fixed TCP port, e.g. on the far host):
+Hub side (hosts the rendezvous point and joins the mesh itself):
 
-    python3 examples/wan_direct.py remote --listen-port 19870 --port 19871
+    python3 examples/gossip_mesh.py hub --hub-port 15671 --port 15670
 
-Client side (this host):
+Join side (any number of nodes, anywhere that can reach the hub):
 
-    python3 examples/wan_direct.py local --peer 192.168.122.87:19870 \\
-        --send "Hello WAN!" --wait 20
+    python3 examples/gossip_mesh.py join --hub 192.168.122.1:15671 \\
+        --send "Hello mesh!" --wait 20
 
-Options mirror the LAN examples plus:
-  --peer HOST:PORT        direct-connect target (repeatable)
-  --listen-port PORT      pin the ROUTER socket to a fixed TCP port
-  --advertised-endpoint   public tcp://host:port told to peers in HELLO
-                          (NAT/port-forward setups: advertise the public address)
+A standalone hub (no mesh membership) is also available:
+
+    python3 -m zre.gossip --port 15671
 """
 
 import argparse
@@ -36,15 +34,6 @@ from _common import (
 from zre import UUIDCollisionError, ZreNode
 
 
-def parse_peer(value: str):
-    host, _, port = value.rpartition(":")
-    if not host or not port.isdigit():
-        raise argparse.ArgumentTypeError(
-            f"peer must look like HOST:PORT, got {value!r}"
-        )
-    return host, int(port)
-
-
 async def run_node(args):
     node = ZreNode(args.name)
     if args.uuid:
@@ -53,26 +42,22 @@ async def run_node(args):
         node.set_port(args.port)
     if args.interface:
         node.set_interface(args.interface)
-    if args.listen_port:
-        node.set_beacon_peer_port(args.listen_port)
-    if args.advertised_endpoint:
-        node.set_advertised_endpoint(args.advertised_endpoint)
     if args.verbose:
         node.set_verbose(True)
+    if args.role == "hub":
+        node.gossip_bind(f"tcp://0.0.0.0:{args.hub_port}")
+        print(f"[{args.name}] hub on 0.0.0.0:{args.hub_port}", flush=True)
+    else:
+        node.gossip_connect(args.hub)
+        print(f"[{args.name}] connecting to hub {args.hub}", flush=True)
     await node.start()
     print(
         f"[{args.name}] READY inbox={node._inbox_port} "
-        f"beacon={node._beacon_port} uuid={node.peer_id_hex[:8]}",
+        f"uuid={node.peer_id_hex[:8]} (beacons off, gossip only)",
         flush=True,
     )
 
     run_task = asyncio.create_task(node.run())
-    await asyncio.sleep(0.5)
-
-    for host, port in args.peer:
-        await node.connect_peer(host, port)
-        print(f"[{args.name}] connecting to {host}:{port}", flush=True)
-
     await node.join(args.group.encode())
 
     sent = False
@@ -85,7 +70,8 @@ async def run_node(args):
             peer = event.get("peer_name", "?")
             if etype == "ENTER":
                 print(
-                    f"[{args.name}] ENTER {peer} {event.get('address', '')}", flush=True
+                    f"[{args.name}] ENTER {peer} {event.get('address', '')}",
+                    flush=True,
                 )
                 if args.send and not sent:
                     await asyncio.sleep(1.0)
@@ -120,28 +106,25 @@ async def run_node(args):
 
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(description="ZRE direct-connect example")
+    parser = argparse.ArgumentParser(description="ZRE gossip-mesh example")
     parser.add_argument(
-        "name", nargs="?", default=f"wan-{uuid.uuid4().hex[:4]}", help="node name"
+        "role", nargs="?", default="join", choices=("hub", "join"), help="node role"
+    )
+    parser.add_argument(
+        "name", nargs="?", default=f"mesh-{uuid.uuid4().hex[:4]}", help="node name"
     )
     parser.add_argument("--port", type=int, default=15670, help="beacon UDP port")
     parser.add_argument("--interface", default=None, help="network interface or IP")
     parser.add_argument(
-        "--listen-port", type=int, default=None, help="fixed TCP ROUTER port"
+        "--hub-port", type=int, default=15671, help="hub TCP port (hub role)"
     )
     parser.add_argument(
-        "--peer",
-        action="append",
-        type=parse_peer,
-        default=[],
-        metavar="HOST:PORT",
-        help="direct-connect target (repeatable)",
-    )
-    parser.add_argument(
-        "--advertised-endpoint", default=None, help="public tcp://host:port in HELLO"
+        "--hub",
+        default="127.0.0.1:15671",
+        help="hub HOST:PORT to connect to (join role)",
     )
     add_uuid_arg(parser)
-    parser.add_argument("--group", default="CHAT", help="group to join")
+    parser.add_argument("--group", default="MESH", help="group to join")
     parser.add_argument("--send", default=None, help="message to SHOUT after ENTER")
     parser.add_argument(
         "--wait", type=float, default=0, help="seconds to run (0 = until Ctrl-C)"
@@ -167,4 +150,3 @@ if __name__ == "__main__":
         sys.exit(3)
     except UUIDCollisionError as exc:
         sys.exit(exit_on_uuid_collision(exc))
-        sys.exit(0)
