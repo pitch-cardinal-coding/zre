@@ -13,4 +13,4 @@ __all__ = [
     "ZreNode",
 ]
 
-__version__ = "0.1.2"
+__version__ = "0.2.0"

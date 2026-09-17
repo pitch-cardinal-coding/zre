@@ -21,7 +21,7 @@ pip install -e .
 ## Running tests and lint
 
 ```bash
-make test      # pytest (65 tests)
+make test      # pytest (99 tests)
 make lint      # ruff check zre tests examples
 make format    # ruff format
 make ci        # check-format + lint + test
