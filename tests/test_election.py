@@ -22,7 +22,7 @@ async def collect(node, seconds=1.0):
 async def meshed_trio():
     nodes = []
     tasks = []
-    for name, uuid_hex, port in zip(("n1", "n2", "n3"), UUIDS, PORTS):
+    for name, uuid_hex, port in zip(("n1", "n2", "n3"), UUIDS, PORTS, strict=False):
         node = ZreNode(name)
         node.set_uuid(uuid_hex)
         node.set_beacon_peer_port(port)
@@ -31,7 +31,7 @@ async def meshed_trio():
         nodes.append(node)
     for node in nodes:
         tasks.append(asyncio.create_task(node.run()))
-    for node, port in zip(nodes, PORTS):
+    for node, port in zip(nodes, PORTS, strict=False):
         for other_port in PORTS:
             if other_port != port:
                 await node.connect_peer("127.0.0.1", other_port)

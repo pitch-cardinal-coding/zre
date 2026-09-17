@@ -31,8 +31,8 @@
   queue, reap timers, and `await asyncio.sleep(0)` so the rest of the
   application keeps running.
 - **Lazy queues** — event/API queues are created on first use inside the
-  running loop (constructing `asyncio.Queue` outside a loop breaks on
-  Python ≤ 3.9).
+  running loop (a leftover from Python ≤ 3.9, where constructing
+  `asyncio.Queue` outside a loop broke; kept because it is harmless).
 - **Beacon send socket** — built lazily, bound to the pinned interface IP
   when one is set; targets are the subnet broadcast plus loopback. The
   listen socket stays on the wildcard: bound sockets miss broadcasts on

@@ -333,7 +333,9 @@ def _(ctx: Ctx, base: str, first: Side, second: Side) -> tuple[bool, str]:
     second.pkill_marker(rid2)
     misses = [
         n
-        for n, ok in zip(["second-sees-first", "first-sees-second"], [ok1, ok2])
+        for n, ok in zip(
+            ["second-sees-first", "first-sees-second"], [ok1, ok2], strict=False
+        )
         if not ok
     ]
     return (not misses), f"missing: {misses}" if misses else ""
@@ -382,7 +384,9 @@ def _(ctx: Ctx, base: str, first: Side, second: Side) -> tuple[bool, str]:
     misses = [
         n
         for n, ok in zip(
-            ["shout1", "shout2", "whisper1", "whisper2"], [ok1, ok2, ok3, ok4]
+            ["shout1", "shout2", "whisper1", "whisper2"],
+            [ok1, ok2, ok3, ok4],
+            strict=False,
         )
         if not ok
     ]
@@ -421,7 +425,9 @@ def _(ctx: Ctx, base: str, first: Side, second: Side) -> tuple[bool, str]:
     second.pkill_marker(rid2)
     misses = [
         n
-        for n, ok in zip(["a->b", "b->a", "no-decrypt-fail"], [ok1, ok2, ok3])
+        for n, ok in zip(
+            ["a->b", "b->a", "no-decrypt-fail"], [ok1, ok2, ok3], strict=False
+        )
         if not ok
     ]
     return (not misses), f"missing: {misses}" if misses else ""
@@ -439,7 +445,7 @@ def _(ctx: Ctx, base: str, first: Side, second: Side) -> tuple[bool, str]:
     ok2 = first.wait_log(first.log_path(rid1), "stroke from board-b:", 25)
     first.pkill_marker(rid1)
     second.pkill_marker(rid2)
-    misses = [n for n, ok in zip(["a->b", "b->a"], [ok1, ok2]) if not ok]
+    misses = [n for n, ok in zip(["a->b", "b->a"], [ok1, ok2], strict=False) if not ok]
     return (not misses), f"missing: {misses}" if misses else ""
 
 
@@ -464,7 +470,7 @@ def _(ctx: Ctx, base: str, first: Side, second: Side) -> tuple[bool, str]:
     ok2 = second.wait_log(second.log_path(rid2), "ENTER peer=", 25)
     first.pkill_marker(rid1)
     second.pkill_marker(rid2)
-    misses = [n for n, ok in zip(["a", "b"], [ok1, ok2]) if not ok]
+    misses = [n for n, ok in zip(["a", "b"], [ok1, ok2], strict=False) if not ok]
     return (not misses), f"missing: {misses}" if misses else ""
 
 
@@ -493,7 +499,7 @@ def _(ctx: Ctx, base: str, first: Side, second: Side) -> tuple[bool, str]:
     ok2 = first.wait_log(first.log_path(rid1), "Peer joined: mon-2", 25)
     first.pkill_marker(rid1)
     second.pkill_marker(rid2)
-    misses = [n for n, ok in zip(["a", "b"], [ok1, ok2]) if not ok]
+    misses = [n for n, ok in zip(["a", "b"], [ok1, ok2], strict=False) if not ok]
     return (not misses), f"missing: {misses}" if misses else ""
 
 
@@ -510,7 +516,11 @@ def _(ctx: Ctx, base: str, first: Side, second: Side) -> tuple[bool, str]:
     ok2 = second.wait_log(second.log_path(rid2), "got task ", 45)
     first.pkill_marker(rid1)
     second.pkill_marker(rid2)
-    misses = [n for n, ok in zip(["coord-result", "worker-task"], [ok1, ok2]) if not ok]
+    misses = [
+        n
+        for n, ok in zip(["coord-result", "worker-task"], [ok1, ok2], strict=False)
+        if not ok
+    ]
     return (not misses), f"missing: {misses}" if misses else ""
 
 
@@ -540,7 +550,9 @@ def _(ctx: Ctx, base: str, first: Side, second: Side) -> tuple[bool, str]:
     first.pkill_marker(rid2)
     second.pkill_marker(rid3)
     misses = [
-        n for n, ok in zip(["client-found", "registry-saw"], [ok1, ok2]) if not ok
+        n
+        for n, ok in zip(["client-found", "registry-saw"], [ok1, ok2], strict=False)
+        if not ok
     ]
     return (not misses), f"missing: {misses}" if misses else ""
 
@@ -572,7 +584,7 @@ def _(ctx: Ctx, base: str, first: Side, second: Side) -> tuple[bool, str]:
     ok2 = second.wait_log(second.log_path(rid2), "Got lock!", 45)
     first.pkill_marker(rid1)
     second.pkill_marker(rid2)
-    misses = [n for n, ok in zip(["a", "b"], [ok1, ok2]) if not ok]
+    misses = [n for n, ok in zip(["a", "b"], [ok1, ok2], strict=False) if not ok]
     return (not misses), f"missing: {misses}" if misses else ""
 
 
@@ -698,7 +710,7 @@ def _(ctx: Ctx, base: str, first: Side, second: Side) -> tuple[bool, str]:
     ok2 = first.wait_log(first.log_path(rid1), f"SHOUT from wan-local: {msg}", 35)
     first.pkill_marker(rid1)
     second.pkill_marker(rid2)
-    misses = [n for n, ok in zip(["dial", "shout"], [ok1, ok2]) if not ok]
+    misses = [n for n, ok in zip(["dial", "shout"], [ok1, ok2], strict=False) if not ok]
     return (not misses), f"missing: {misses}" if misses else ""
 
 
@@ -743,7 +755,9 @@ def _(ctx: Ctx, base: str, first: Side, second: Side) -> tuple[bool, str]:
     ok2 = first.wait_log(first.log_path(rid1), f"SHOUT from join-node: {msg}", 35)
     first.pkill_marker(rid1)
     second.pkill_marker(rid2)
-    misses = [n for n, ok in zip(["discover", "shout"], [ok1, ok2]) if not ok]
+    misses = [
+        n for n, ok in zip(["discover", "shout"], [ok1, ok2], strict=False) if not ok
+    ]
     return (not misses), f"missing: {misses}" if misses else ""
 
 

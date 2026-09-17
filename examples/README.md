@@ -60,7 +60,7 @@ next one uses.
 
 ## 2. Install (once)
 
-You need Python 3.9+ and Linux or macOS.
+You need Python 3.10+ and Linux or macOS.
 
 ```bash
 cd zre                        # the repository folder

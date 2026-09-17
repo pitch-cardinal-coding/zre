@@ -25,7 +25,7 @@ Wire conformance details: [docs/PROTOCOL.md](docs/PROTOCOL.md).
 
 ## Installation
 
-Requires Python 3.9+ on Linux or macOS.
+Requires Python 3.10+ on Linux or macOS.
 
 ```bash
 pip install zre

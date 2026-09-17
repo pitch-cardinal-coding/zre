@@ -1,6 +1,6 @@
 # zre release pipeline (PyPI distribution: zre).
 #
-#   push/PR to main  ->  test (py3.9/3.12/3.14: ruff + pytest)  ->  build (sdist+wheel, twine check)
+#   push/PR to main  ->  test (py3.10/3.12/3.14: ruff + pytest)  ->  build (sdist+wheel, twine check)
 #   push of a v* tag ->  test -> build -> publish to PyPI via Trusted Publishing (OIDC, no tokens)
 #
 # One-time setup (per index): register the trusted publisher for project
@@ -41,7 +41,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python: ["3.9", "3.12", "3.14"]
+        python: ["3.10", "3.12", "3.14"]
     env:
       # Isolate the suite's UDP beacon port: runners and containers can
       # host other ZRE-speaking services on the 15670 default, which the
