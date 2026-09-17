@@ -846,6 +846,8 @@ class ZreNode:
         (same dealer, same connection -- never closed and reopened, so the
         far-side routing entry stays valid).
         """
+        if not self._running:
+            return
         for peer in self._peers.values():
             if peer.addr == host and peer.port == port and peer.connected:
                 return
@@ -1032,6 +1034,8 @@ class ZreNode:
             self._start_election(group_bytes)
 
     async def _gossip_require(self, uuid_hex: str, endpoint: str, now: float) -> None:
+        if not self._running:
+            return
         if uuid_hex == self.peer_id_hex:
             return
         if "|" in endpoint:
@@ -1449,6 +1453,8 @@ class ZreNode:
             self._send_sock = None
 
     def _handle_beacon(self, data: bytes, addr: tuple) -> None:
+        if not self._running:
+            return
         if len(data) not in (BEACON_SIZE, BEACON_SIZE_V3) or data[:3] != b"ZRE":
             return
         version = data[3]
@@ -1676,6 +1682,8 @@ class ZreNode:
     async def _handle_hello(
         self, rhex: str, extra: dict, existing: Peer | None
     ) -> None:
+        if not self._running:
+            return
         ep = extra.get("endpoint")
         if rhex == self.peer_id_hex:
             # Own-uuid HELLO. If it announces our inbox port it is our own
