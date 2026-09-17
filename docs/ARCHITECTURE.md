@@ -45,3 +45,21 @@
   `UUIDCollisionError` out of `run()`; the node tears its sockets down
   without sending the goodbye beacon (that would announce the *other*
   node's departure to its peers).
+- **Gossip mode** — `gossip_bind()` hosts a `GossipHub` in-process and
+  `gossip_connect()` dials one; while either is set, the UDP beacon
+  socket is never created. A `_gossip_loop` task (same event loop)
+  PUBLISHes our endpoint, retries hub connects until one answers, and
+  feeds `DELIVER`/`SNAPSHOT` tuples into the normal require-peer path,
+  so gossip and beacon peers end up in the same tables. Departures send
+  `GOODBYE` on ZRE links plus hub `UNPUBLISH`.
+- **Elections** — per-`Group` contest flag + `{caw, father, erec, lrec,
+  leader}` record; triggers on self/peer JOIN, HELLO-carried groups,
+  LEAVE, peer expiry/removal, and goodbye. Lowest id wins; supporters
+  echo toward their father; winner broadcasts LEADER; everyone emits the
+  local LEADER event on lrec-complete. A lone contestant leads itself.
+- **Curve/ZAP** — `set_zcert()` stores raw key bytes (32 B or z85);
+  `start()` applies them to the ROUTER inbox as server + ZAP domain
+  (`global` default, like libzyre); every dial applies our keypair plus
+  the peer's server key (from v3 beacons, `|pubkey` endpoint suffixes,
+  or explicit `connect_peer(..., public_key=...)`). Peers with unknown
+  keys are refused, and secure nodes toss keyless v1 beacons.

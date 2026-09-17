@@ -23,8 +23,8 @@ Usage:
 enables the wan_direct test, which listens on TCP base-port+200 on the local
 machine and dials it from the remote.
 
-Requires sshpass locally and free UDP ports on both ends (15 ports starting
-at --base-port, plus one TCP port at base-port+200 — checked at preflight).
+Requires sshpass locally and free UDP ports on both ends (17 ports starting
+at --base-port, plus TCP ports at base-port+200/+201 — checked at preflight).
 
 Every launched example carries ``--uuid xsmoke-<rid>``; cleanup pkills that
 marker (with a bracket trick so the pattern never matches its own shell).
@@ -702,6 +702,91 @@ def _(ctx: Ctx, base: str, first: Side, second: Side) -> tuple[bool, str]:
     return (not misses), f"missing: {misses}" if misses else ""
 
 
+@test("gossip_mesh", "wan")
+def _(ctx: Ctx, base: str, first: Side, second: Side) -> tuple[bool, str]:
+    # `first` hosts the hub; `second` joins it. No shared beacons needed.
+    port = ctx.ports["gossip_mesh"]
+    first_addr = ctx.ports.get("_first_addr", "")
+    if not first_addr:
+        return True, "skipped: pass --first-addr IP to enable"
+    hub_tcp = ctx.ports["_gossip_listen"]
+    hub_host = (
+        first_addr if first.name == "local" else ctx.ports.get("_remote_addr", "")
+    )
+    rid1, rid2 = ctx.rid("gossip", first, "hub"), ctx.rid("gossip", second, "join")
+    msg = f"gossip-{first.name}-to-{second.name}"
+    first.start_example(
+        "gossip_mesh",
+        ["hub", "hub-node", "--port", str(port), "--hub-port", str(hub_tcp)],
+        rid1,
+        70,
+    )
+    time.sleep(3)
+    second.start_example(
+        "gossip_mesh",
+        [
+            "join",
+            "join-node",
+            "--port",
+            str(port),
+            "--hub",
+            f"{hub_host}:{hub_tcp}",
+            "--send",
+            msg,
+            "--wait",
+            "20",
+        ],
+        rid2,
+        50,
+    )
+    ok1 = second.wait_log(second.log_path(rid2), "ENTER hub-node", 35)
+    ok2 = first.wait_log(first.log_path(rid1), f"SHOUT from join-node: {msg}", 35)
+    first.pkill_marker(rid1)
+    second.pkill_marker(rid2)
+    misses = [n for n, ok in zip(["discover", "shout"], [ok1, ok2]) if not ok]
+    return (not misses), f"missing: {misses}" if misses else ""
+
+
+@test("leader_election", "coord")
+def _(ctx: Ctx, base: str, first: Side, second: Side) -> tuple[bool, str]:
+    port = ctx.ports["leader_election"]
+    rid1, rid2 = ctx.rid("lead", first, "1"), ctx.rid("lead", second, "2")
+    first.start_example(
+        "leader_election",
+        ["voter-1", "--port", str(port), "--group", "XWORK", "--wait", "30"],
+        rid1,
+        60,
+    )
+    time.sleep(3)
+    second.start_example(
+        "leader_election",
+        ["voter-2", "--port", str(port), "--group", "XWORK", "--wait", "25"],
+        rid2,
+        50,
+    )
+    time.sleep(18)
+    import re as _re
+
+    leaders1 = set(
+        _re.findall(
+            r"LEADER \S+ (\S{8}) in XWORK", first.read_file(first.log_path(rid1))
+        )
+    )
+    leaders2 = set(
+        _re.findall(
+            r"LEADER \S+ (\S{8}) in XWORK", second.read_file(second.log_path(rid2))
+        )
+    )
+    first.pkill_marker(rid1)
+    second.pkill_marker(rid2)
+    if not leaders1 or not leaders2:
+        return False, f"no LEADER seen: first={leaders1} second={leaders2}"
+    common = leaders1 & leaders2
+    if not common:
+        return False, f"sides disagree: first={leaders1} second={leaders2}"
+    return True, ""
+
+
 PORT_ORDER = [
     "presence",
     "chat",
@@ -717,6 +802,8 @@ PORT_ORDER = [
     "game_sync",
     "file_transfer",
     "media_stream",
+    "gossip_mesh",
+    "leader_election",
     "wan_direct",
     "uuid_collision",
 ]
@@ -840,12 +927,19 @@ def main() -> int:
         remote, wan_listen, tcp=True
     ):
         busy.append(f"wan:{wan_listen}(tcp)")
+    gossip_listen = args.base_port + 201
+    if not port_probe(host, gossip_listen, tcp=True) or not port_probe(
+        remote, gossip_listen, tcp=True
+    ):
+        busy.append(f"gossip:{gossip_listen}(tcp)")
     if busy:
         log(f"FAIL: ports busy on a side: {busy} — choose another --base-port")
         return 2
     ports = {name: args.base_port + i * 10 for i, name in enumerate(PORT_ORDER)}
     ports["_wan_listen"] = wan_listen
+    ports["_gossip_listen"] = gossip_listen
     ports["_first_addr"] = args.first_addr
+    ports["_remote_addr"] = args.peer.split("@")[-1]
     log(f"   using ports {args.base_port}..{wan_listen} on both sides")
 
     log("== preflight: kill leftovers from previous runs")

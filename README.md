@@ -12,8 +12,9 @@
 | Feature | Description |
 |---------|-------------|
 | **Zero-configuration** | No central servers, brokers, or admin |
-| **Peer discovery** | Automatic via UDP broadcast beacons (port 15670), or direct dial via `connect_peer(host, port)` where broadcasts can't reach |
-| **Group messaging** | Join/leave named groups, multicast via unicast |
+| **Peer discovery** | Automatic via UDP broadcast beacons (port 15670), direct dial via `connect_peer(host, port)` where broadcasts can't reach, or UDP-free gossip hub (`gossip_bind` / `gossip_connect`, `python3 -m zre.gossip`) |
+| **Group messaging** | Join/leave named groups, multicast via unicast; per-group leader elections with `LEADER` events |
+| **Transport security** | Optional CurveZMQ + ZAP (`set_zcert`, `set_zap_domain`) with v3 beacons |
 | **Direct messaging** | Whisper to individual peers |
 | **Stable peer ids** | Optional fixed UUID (`set_uuid`) so `peer_hex` survives restarts |
 | **Heartbeating** | Automatic detection of peers going evasive, silent, or dead |
@@ -90,10 +91,15 @@ node.set_port(15670)  # UDP beacon port (cluster isolation)
 node.set_interface("eth0")  # pin NIC (or an IP) on multi-homed hosts
 node.set_interval(1000)  # beacon interval, ms
 node.set_evasive_timeout(5000)  # peer quiet -> EVASIVE probes, ms
+node.set_silent_timeout(5000)  # alias of the evasive timeout
 node.set_expired_timeout(30000)  # peer silent -> removed, ms
 node.set_beacon_peer_port(9999)  # fixed TCP ROUTER port (default ephemeral)
 node.set_advertised_endpoint("tcp://203.0.113.50:9999")  # NAT setups
 node.set_uuid("32-char-hex-or-16-bytes")  # stable peer id (default random)
+node.set_ipv6(True)  # enable IPv6 on TCP sockets (beacon stays IPv4)
+node.set_zcert(public_key, secret_key)  # CurveZMQ transport crypto (32 B / z85)
+node.set_zap_domain("global")  # ZAP domain for Curve clients
+node.set_contest_in_group("WORKERS")  # opt into group-leader elections
 node.set_verbose()  # wire-level logging
 
 # Duplicate-uuid guard: if another node with the same stable uuid is live
@@ -105,13 +111,24 @@ run_task = asyncio.create_task(node.run())  # REQUIRED: drive the node
 
 await node.join("CHAT")  # / leave(group)
 await node.shout("CHAT", b"hi all")  # group message
+await node.shouts("CHAT", "hi all")  # same, str convenience
 await node.whisper(peer_hex, b"hi")  # direct message (peer id = UUID hex)
+await node.whispers(peer_hex, "hi")  # same, str convenience
 await node.connect_peer("10.0.0.7", 9999)  # direct dial, no beacons
+await node.connect_peer("10.0.0.7", 9999, public_key=peer_key)  # Curve dial
+
+node.gossip_bind("tcp://0.0.0.0:15671")  # host a discovery hub (no beacons)
+node.gossip_connect("tcp://10.0.0.7:15671")  # join one (UDP-free mesh)
+# or: python3 -m zre.gossip --port 15671  (standalone hub)
 
 async for event in node.events():  # or: event = await node.recv(timeout=1.0)
     ...
 node.peers()  # list of peer UUID hexes
 node.own_groups()  # groups this node joined
+node.peers_by_group("CHAT")  # peer ids in a group
+node.peer_groups()  # all groups known through peers
+node.peer_address(peer_hex)  # peer endpoint ("" when unknown)
+node.peer_header_value(peer_hex, "X-ROLE")  # one peer header (None when missing)
 
 run_task.cancel()
 await node.stop()
@@ -127,6 +144,7 @@ await node.stop()
 | `SHOUT` | Group message | `peer_id`, `peer_name`, `group`, `payload` |
 | `WHISPER` | Direct message | `peer_id`, `peer_name`, `payload` |
 | `EVASIVE` | Peer went quiet (probing started; emitted once per quiet episode, at most every 20 s — an idle-but-alive peer answers the probe and stays) | `peer_id`, `peer_name` |
+| `LEADER` | Group election converged (lowest contestant id wins; lone contestant leads itself) | `peer_id`, `peer_name`, `group` |
 | `COLLISION` | Another node with this node's stable uuid is live on the network; the node emits this, then stops itself | `detail` |
 
 `EXIT` is the only reliable "peer is gone" signal. `COLLISION` is emitted
@@ -163,7 +181,7 @@ for the handshake rules (no phantom peers, duplicate-HELLO storm guard).
 ## Testing
 
 ```bash
-python3 -m pytest tests/ -v        # LAN + WAN protocol coverage (76 tests)
+python3 -m pytest tests/ -v        # protocol + feature coverage (99 tests)
 make test                          # same, via Makefile
 make ci                            # format + lint + tests
 ```
@@ -220,6 +238,6 @@ and [docs/SECURITY.md](docs/SECURITY.md).
 
 ---
 
-**Status**: Production-ready — 76 tests passing (LAN + WAN), all 16
+**Status**: Production-ready — 99 tests passing, all 18
 examples verified live on two machines across subnets in both directions
-(`scripts/cross_smoke.py`, 30/30).
+(`scripts/cross_smoke.py`, 36/36).

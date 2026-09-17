@@ -49,7 +49,9 @@ Each one wraps that idea in a different skin:
 | 13 | `game_sync.py` | Game state sync | server + clients |
 | 14 | `fast_tick.py` | Instant discovery | registry + service |
 | 15 | `wan_direct.py` | Across subnets | remote + local |
-| 16 | `benchmark.py` | Measurements | self-contained |
+| 16 | `gossip_mesh.py` | Discovery without beacons | hub + join |
+| 17 | `leader_election.py` | Group coordinator vote | any number of voters |
+| 18 | `benchmark.py` | Measurements | self-contained |
 
 Run them in this order the first time — each one teaches the concept the
 next one uses.
@@ -550,6 +552,8 @@ All 5 nodes discovered each other in 0.15s
 
 Needs two machines/subnets to be interesting; covered below.
 
+### 5.17 gossip_mesh.py — discovery without beacons
+
 ---
 
 ## 6. Two-machine testing
@@ -576,8 +580,11 @@ Recommended pairing (the roles that were designed to be split):
 | distributed_lock | `distributed_lock.py node-1 --port 24100` | `distributed_lock.py node-2 --port 24100` |
 | game_sync | `game_sync.py server --port 24100` | `game_sync.py client Alice --port 24100` |
 | fast_tick | `fast_tick.py --role registry --port 24100` | `fast_tick.py --role service --port 24100` |
+| wan_direct | `wan_direct.py remote --listen-port 24230 --port 24240` | `wan_direct.py local --peer A:24230 --send hi --wait 25 --port 24250` |
+| gossip_mesh | `gossip_mesh.py hub --port 24100 --hub-port 24101` | `gossip_mesh.py join --port 24100 --hub A:24101 --send hi` |
+| leader_election | `leader_election.py alice --port 24100 --group WORKERS` | `leader_election.py bob --port 24100 --group WORKERS` |
 
-All 14 role-splittable examples above were verified across a laptop and a
+All 16 role-splittable examples above were verified across a laptop and a
 separate VM (different subnets, no shared broadcast domain — see the next
 section for how that even worked), in **both** role directions.
 
@@ -727,10 +734,10 @@ make cross-smoke PEER=iam@192.168.122.87 PASSWORD=SECRET \
 1. **Preflight** — checks ssh to B, checks the venv exists on B, checks
    every UDP/TCP port is free on **both** machines, kills leftovers from
    any earlier run.
-2. For each of the 15 examples: run it A-first, then B-first (role swap).
+2. For each of the 17 examples: run it A-first, then B-first (role swap).
    Transfers are verified with sha256 on the receiving machine; chat and
    whisper are matched against the example's real output lines.
-3. **Summary** — `== 30/30 passed` style table; non-zero exit code on any
+3. **Summary** — `== 36/36 passed` style table; non-zero exit code on any
    failure. With `--keep-logs` the per-process logs stay in
    `/tmp/zre-cross-smoke/` for inspection.
 
@@ -738,8 +745,8 @@ make cross-smoke PEER=iam@192.168.122.87 PASSWORD=SECRET \
 
 ```bash
 --groups lan          # presence, chat, secure_chat, whiteboard, fast_tick
---groups coord        # sensor, health, task_queue, discovery, config, lock, game
---groups data,wan     # file_transfer, media_stream, wan_direct
+--groups coord        # sensor, health, task_queue, discovery, config, lock, game, leader_election
+--groups data,wan     # file_transfer, media_stream, wan_direct, gossip_mesh
 -k file_transfer,chat # only tests whose name contains one of these
 --list-tests          # show the test registry and exit
 --keep-logs           # keep /tmp/zre-cross-smoke/ for debugging

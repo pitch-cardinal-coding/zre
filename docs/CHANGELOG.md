@@ -5,6 +5,33 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- UDP-free gossip discovery: `gossip_bind()` / `gossip_connect()` /
+  `gossip_unpublish()` / `gossip_connect_curve()` plus a standalone hub
+  (`python3 -m zre.gossip`) and a `GOODBYE` command for gossip shutdowns.
+- CurveZMQ transport security (`set_zcert`, `set_zap_domain`) with 54-byte
+  v3 beacons and downgrade protection.
+- Per-group leader elections (`set_contest_in_group`, `LEADER` event,
+  `ELECT(8)` / `LEADER(9)` commands).
+- IPv6 for TCP dialing and endpoints (`set_ipv6`); the UDP beacon stays
+  IPv4.
+- Peer query helpers: `peers_by_group()`, `peer_groups()`,
+  `peer_address()`, `peer_header_value()`.
+- `whispers()` / `shouts()` convenience sends, `set_silent_timeout()`,
+  `print()` / `dump()` / `version()`.
+- `examples/gossip_mesh.py` and `examples/leader_election.py`, both
+  covered by `scripts/cross_smoke.py` in both role directions.
+
+### Fixed
+
+- Pending dials now adopt by port when HELLO reports another interface IP.
+- Gossip publishes a reachable endpoint on wildcard-bound hubs.
+- Elections restart when a peer leaves via beacon EXIT.
+- ROUTER handover so reconnects replace stale routes.
+
 ## [0.1.2] - 2026-09-13
 
 ### Changed
