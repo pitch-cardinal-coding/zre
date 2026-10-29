@@ -34,14 +34,33 @@ from collections.abc import AsyncIterator
 import zmq
 from zmq.utils import z85
 
-from .gossip import GossipHub, encode_message, read_message
+from .gossip import (
+    ZGS_HELLO,
+    ZGS_INVALID,
+    ZGS_PING,
+    ZGS_PUBLISH,
+    GossipHub,
+    zgs_decode,
+    zgs_encode,
+)
 
 ZRE_SIGNATURE = 0xAAA0 | 1  # 0xAAA1 on wire, per RFC 36
 ZRE_VERSION = 2
 HELLO, WHISPER, SHOUT, JOIN, LEAVE, PING, PING_OK, ELECT, LEADER, GOODBYE = range(1, 11)
-BEACON_PORT = 15670
+# RFC 36 section "Node Discovery and Presence": every ZRE node listens to and
+# broadcasts on UDP 5670 (ZRE-DISC, IANA assigned). libzyre uses the same value
+# (zyre_library.h: ZRE_DISCOVERY_PORT 5670), so anything else here would put a
+# zre node and a libzyre node on two different, non-overlapping clusters.
+BEACON_PORT = 5670
 BEACON_SIZE = 22
 BEACON_SIZE_V3 = 54
+BEACON_VERSION_V1 = 0x01
+BEACON_VERSION_V3 = 0x03
+# zre_msg.h caps every string field (endpoint, name, group, challenger/leader
+# id) in a char[256], so the one-octet length prefix on the wire can never
+# carry more than 255 bytes for a libzyre peer. Keep our own values in range.
+MAX_STRING_BYTES = 255
+PUBLIC_KEY_HEADER = b"X-PUBLICKEY"
 
 # ioctl numbers for interface address/netmask lookup (Linux, stable ABI).
 SIOCGIFADDR = 0x8915
@@ -49,6 +68,22 @@ SIOCGIFNETMASK = 0x891B
 DEFAULT_EV_MS = 5000
 DEFAULT_EX_MS = 30000
 REAP_INTERVAL_MS = 1000
+
+
+def _wire_string(label: str, value: str | bytes) -> bytes:
+    """Encode a short-string field, rejecting values libzyre would truncate.
+
+    Group, name, endpoint and the election identities travel in `char[256]`
+    fields on the C side (zre_msg.c), so anything over 255 bytes is silently
+    cut there. Fail loudly here instead of sending a message the far side
+    decodes as something else.
+    """
+    raw = value.encode() if isinstance(value, str) else value
+    if len(raw) > MAX_STRING_BYTES:
+        raise ValueError(
+            f"{label} must be at most {MAX_STRING_BYTES} bytes, got {len(raw)}"
+        )
+    return raw
 
 
 def _tcp_address(addr: str, port: int) -> str:
@@ -315,15 +350,65 @@ class Peer:
         self.connected = False
         self.ready = False
 
+    def next_seq(self) -> int:
+        """Consume and return this peer's next outgoing sequence number.
+
+        RFC 36: "The first message from a peer (HELLO) MUST have sequence
+        number 1, and every message must have a strictly incrementing
+        sequence number." The counter is per connection, not per node:
+        libzyre keeps it in zyre_peer_t::sent_sequence and *drops* the peer
+        when the numbers it receives do not match what it expects
+        (zyre_peer.c:495 messages_lost -> zyre_node.c:1121 remove_peer). A
+        node-wide counter therefore breaks every libzyre peer as soon as a
+        second peer joins, so it must not be used here.
+        """
+        self.sent_seq = (self.sent_seq + 1) & 0xFFFF
+        return self.sent_seq
+
     def send(self, data: bytes, more: list | None = None) -> bool:
+        """Send an already encoded frame. No sequence bookkeeping."""
         if not self.connected or self.dealer is None:
             return False
         try:
             self.dealer.send_multipart([data] + (more or []), zmq.NOBLOCK)
-            self.sent_seq += 1
             return True
         except zmq.ZMQError:
             return False
+
+    def send_encoded(self, encode, more: list | None = None) -> bool:
+        """Stamp this peer's sequence number, encode, then send.
+
+        `encode` receives the sequence number and returns the frame bytes.
+        Messages that could not be queued are dropped and the peer is torn
+        down, mirroring zyre_peer_send()'s EAGAIN handling.
+        """
+        if not self.connected or self.dealer is None:
+            return False
+        frame = encode(self.next_seq())
+        try:
+            self.dealer.send_multipart([frame] + (more or []), zmq.NOBLOCK)
+            return True
+        except zmq.Again:
+            self.disconnect()
+            return False
+        except zmq.ZMQError:
+            return False
+
+    def send_cmd(
+        self,
+        cmd: int,
+        group: bytes | None = None,
+        status: int | None = None,
+        more: list | None = None,
+    ) -> bool:
+        return self.send_encoded(
+            lambda seq: Codec.encode_simple(cmd, seq, group, status), more
+        )
+
+    def send_election(self, cmd: int, group: bytes, identity: bytes) -> bool:
+        return self.send_encoded(
+            lambda seq: Codec.encode_election(cmd, seq, group, identity)
+        )
 
     def refresh(self, now: float, ev_ms: int, ex_ms: int) -> None:
         self.evasive_at = now + ev_ms / 1000.0
@@ -350,10 +435,16 @@ class Group:
     def leave(self, peer: Peer) -> None:
         self.peers.pop(peer.uuid_hex, None)
 
-    def send(self, hdr: bytes, more: list | None = None) -> None:
-        for peer in self.peers.values():
+    def send(self, encode, more: list | None = None) -> None:
+        """Send one logical message to every peer in the group.
+
+        `encode(seq)` is called once per peer so each DEALER gets its own
+        sequence number, the way libzyre's zyre_group_send() duplicates the
+        message per peer and lets zyre_peer_send() stamp the sequence.
+        """
+        for peer in list(self.peers.values()):
             if peer.connected:
-                peer.send(hdr, more)
+                peer.send_encoded(encode, more)
 
 
 class ZreNode:
@@ -371,7 +462,9 @@ class ZreNode:
     def __init__(self, name=None):
         if name is None:
             name = _uuid_mod.uuid4().hex[:6]
-        self.name = name.encode() if isinstance(name, str) else name
+        # Matches libzyre: the default name is the first 6 characters of the
+        # node UUID, which is stable and readable in both logs.
+        self.name = _wire_string("name", name)
         self.peer_id = _uuid_mod.uuid4().bytes
         self.peer_id_hex = self.peer_id.hex()
         self._groups: dict[bytes, Group] = {}
@@ -380,8 +473,10 @@ class ZreNode:
         self._peers: dict[str, Peer] = {}
         self._pending: dict[str, Peer] = {}
         self._headers: dict[bytes, bytes] = {}
+        # Group status byte: bumped on every own join/leave, mirrored by
+        # libzyre (zyre_node.c JOIN/LEAVE: ++self->status) and asserted
+        # against the peer's own count with a `byte` on the C side.
         self._status = 0
-        self._seq = 1
         self._ev_timeout = DEFAULT_EV_MS
         self._ex_timeout = DEFAULT_EX_MS
         # EVASIVE re-emit throttle: an idle peer is probed every reap cycle
@@ -402,14 +497,30 @@ class ZreNode:
         self._advertised_endpoint = None
         self._curve_public: bytes | None = None
         self._curve_secret: bytes | None = None
+        # Curve nodes broadcast v3 beacons (public key appended), plain
+        # nodes v1. libzyre tosses any beacon whose version differs from
+        # its own beacon_version (zyre_node.c recv_beacon), so the same rule
+        # keeps a mixed-secure cluster from splitting in two.
+        self._beacon_version = BEACON_VERSION_V1
         self._zap_domain = "global"
         self._ipv6 = False
+        # Peer public keys learned from v3 beacons, gossip announcements and
+        # HELLO headers, keyed by peer id and by "host:port".
         self._peer_server_keys: dict[str, bytes] = {}
         self._gossip_bind: str | None = None
         self._gossip_connects: list[str] = []
-        self._gossip_server: asyncio.AbstractServer | None = None
-        self._gossip_links: list[tuple[asyncio.StreamReader, asyncio.StreamWriter]] = []
-        self._gossip_task: asyncio.Task | None = None
+        # ZGS.1 gossip service (zgossip wire-compatible): one ROUTER hub and
+        # DEALER client sockets, all served from the main poller — the same
+        # shape zyre uses with its zgossip delegate actor.
+        self._gossip_hub: GossipHub | None = None
+        self._gossip_socks: list[zmq.Socket] = []
+        # Tuples to re-publish after a (re)connect: our own announcement plus
+        # everything learned from the hub — zgossip.c re-publishes "for each
+        # tuple we have" after every HELLO.
+        self._gossip_tuples: dict[bytes, tuple[bytes, int]] = {}
+        self._gossip_targets: dict[zmq.Socket, tuple[str, int]] = {}
+        self._gossip_last_rx: dict[zmq.Socket, float] = {}
+        self._gossip_next_ping = 0.0
         self._verbose = False
         self._logger = logging.getLogger(f"zre.{self.peer_id_hex[:6]}")
 
@@ -481,7 +592,7 @@ class ZreNode:
         self._interface = iface
 
     def set_port(self, port: int) -> None:
-        """Set UDP beacon port (default 15670). Use different port to isolate clusters."""
+        """Set UDP beacon port (default 5670). Use different port to isolate clusters."""
         self._ensure_not_running("set_port")
         if not 1 <= port <= 65535:
             raise ValueError("port must be 1-65535")
@@ -520,7 +631,8 @@ class ZreNode:
         self._ensure_not_running("set_advertised_endpoint")
         if not endpoint.startswith("tcp://"):
             raise ValueError("advertised endpoint must look like tcp://host:port")
-        self._advertised_endpoint = endpoint
+        _split_endpoint(endpoint)
+        self._advertised_endpoint = _wire_string("endpoint", endpoint)
 
     @staticmethod
     def _curve_key_raw(value: bytes | str, label: str) -> bytes:
@@ -539,6 +651,12 @@ class ZreNode:
         self._ensure_not_running("set_zcert")
         self._curve_public = self._curve_key_raw(public_key, "public_key")
         self._curve_secret = self._curve_key_raw(secret_key, "secret_key")
+        # libzyre publishes its Curve public key as an X-PUBLICKEY header
+        # (zyre_node.c "SET PUBLICKEY" -> zhash_update(headers, ...)) and
+        # *requires* it on an inbound HELLO: a HELLO without the header is
+        # discarded to avoid a security downgrade. Mirror both halves, or a
+        # libzyre peer never accepts our connection.
+        self.set_header(PUBLIC_KEY_HEADER, z85.encode(self._curve_public))
 
     def set_zap_domain(self, domain: str) -> None:
         self._ensure_not_running("set_zap_domain")
@@ -568,11 +686,16 @@ class ZreNode:
         self._ensure_not_running("gossip_connect_curve")
         self._gossip_connects.append(endpoint)
 
-    async def gossip_unpublish(self, node_uuid: str) -> None:
-        for _, writer in list(self._gossip_links):
-            with contextlib.suppress(Exception):
-                writer.write(encode_message({"cmd": "UNPUBLISH", "uuid": node_uuid}))
-                await writer.drain()
+    def gossip_unpublish(self, node_uuid: str) -> None:
+        """Remove a tuple from our gossip tables.
+
+        Mirrors zgossip's UNPUBLISH actor method (a local table delete —
+        ZGS.1 has no forget command on the wire).
+        """
+        raw = node_uuid.encode() if isinstance(node_uuid, str) else node_uuid
+        self._gossip_tuples.pop(raw, None)
+        if self._gossip_hub is not None:
+            self._gossip_hub.unpublish(raw)
 
     def _gossip_active(self) -> bool:
         return self._gossip_bind is not None or bool(self._gossip_connects)
@@ -609,7 +732,7 @@ class ZreNode:
         self._verbose = bool(verbose)
 
     def set_contest_in_group(self, group: str | bytes) -> None:
-        group_bytes = group.encode() if isinstance(group, str) else group
+        group_bytes = _wire_string("group", group)
         self._contest_groups.add(group_bytes)
         found = self._groups.get(group_bytes)
         if found is not None:
@@ -637,17 +760,28 @@ class ZreNode:
         return server_key, self._curve_public, self._curve_secret
 
     def _build_beacon(self, port: int) -> bytes:
-        if self._curve_secret is not None:
+        if self._beacon_version == BEACON_VERSION_V3:
             return (
-                b"ZRE\x03" + self.peer_id + struct.pack("!H", port) + self._curve_public
+                b"ZRE"
+                + bytes([BEACON_VERSION_V3])
+                + self.peer_id
+                + struct.pack("!H", port)
+                + self._curve_public
             )
-        return b"ZRE\x01" + self.peer_id + struct.pack("!H", port)
+        return (
+            b"ZRE" + bytes([BEACON_VERSION_V1]) + self.peer_id + struct.pack("!H", port)
+        )
 
-    def _resolve_interface_ip(self) -> str:
-        """Resolve interface name to IP; if already IP, return as-is."""
-        if not self._interface:
+    def _resolve_interface_ip(self, iface: str | None = None) -> str:
+        """Resolve an interface name to its IPv4 address; pass an IP as-is.
+
+        With no argument the node's pinned interface (`set_interface`) is
+        used. An empty result means "no pin" and callers fall back to their
+        own defaults.
+        """
+        iface = self._interface if iface is None else iface
+        if not iface:
             return ""
-        iface = self._interface
         # If it looks like an IP, return directly
         try:
             socket.inet_aton(iface)
@@ -683,6 +817,7 @@ class ZreNode:
         if self._ipv6:
             self._inbox.setsockopt(zmq.IPV6, 1)
         if self._curve_secret is not None:
+            self._beacon_version = BEACON_VERSION_V3
             self._inbox.setsockopt(zmq.CURVE_PUBLICKEY, self._curve_public)
             self._inbox.setsockopt(zmq.CURVE_SECRETKEY, self._curve_secret)
             self._inbox.setsockopt(zmq.CURVE_SERVER, 1)
@@ -696,6 +831,39 @@ class ZreNode:
             self._beacon_sock = None
             self._beacon_fd = -1
             self._beacon_msg = None
+            own_key = self.peer_id_hex.encode()
+            hub_host, hub_port = "127.0.0.1", 0
+            if self._gossip_bind is not None:
+                hub_host, hub_port = self._split_hub_endpoint(self._gossip_bind)
+                self._gossip_hub = GossipHub(self._ctx)
+                self._gossip_hub.bind(self._gossip_bind)
+                self._inbox_poller.register(self._gossip_hub.socket, zmq.POLLIN)
+                # Our own tuple goes straight into the hub table, the way
+                # zyre sends the PUBLISH actor command to its zgossip
+                # delegate after bind.
+                self._gossip_tuples[own_key] = (
+                    self._gossip_publish_endpoint(hub_host, hub_port),
+                    0,
+                )
+                self._gossip_hub.publish(own_key, *self._gossip_tuples[own_key])
+            for target in self._gossip_connects:
+                host, port = self._split_hub_endpoint(target)
+                sock = self._ctx.socket(zmq.DEALER)
+                sock.setsockopt(zmq.SNDHWM, 1000)
+                sock.setsockopt(zmq.LINGER, 0)
+                sock.connect(target)
+                self._gossip_socks.append(sock)
+                self._gossip_targets[sock] = (host, port)
+                self._gossip_last_rx[sock] = self._now()
+                self._inbox_poller.register(sock, zmq.POLLIN)
+                if own_key not in self._gossip_tuples:
+                    self._gossip_tuples[own_key] = (
+                        self._gossip_publish_endpoint(host, port),
+                        0,
+                    )
+                # zgossip client flow: HELLO first, then PUBLISH for each
+                # tuple we have.
+                self._gossip_announce(sock)
         else:
             self._beacon_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             self._beacon_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -728,21 +896,40 @@ class ZreNode:
         await self._send_beacon()
 
     async def stop(self) -> None:
-        if not self._running:
-            return
+        """Stop the node and release every socket deterministically.
+
+        The teardown runs even when the run loop already ended (the
+        UUID-collision path sets `_running` false itself, and tests stop
+        nodes by flipping the flag directly). An early return here left
+        the ROUTER and DEALER sockets with their shared Context open —
+        `Context.term()` only completes once every socket is closed, so
+        the leaked context sat in the garbage collector and blocked
+        pytest's `gc_collect_harder` inside `Context.__del__` for good.
+        Idempotent: safe to call from any state, any number of times.
+        The safe published pattern around a live run loop is
+        cancel() -> join() -> stop(); stop() running while the loop is
+        still alive is supported — the suppressed close paths absorb
+        the race, as exercised by the idempotency test in
+        tests/test_teardown.py.
+        """
+        was_running = self._running
         self._running = False
-        with contextlib.suppress(Exception):
-            await self._send_beacon(port=0)
-        if self._gossip_active():
+        if was_running:
             with contextlib.suppress(Exception):
-                await self._gossip_shutdown()
-            goodbye = Codec.encode_simple(GOODBYE, self._next_seq())
-            for peer in list(self._peers.values()):
+                await self._send_beacon(port=0)
+            if self._gossip_active():
+                # GOODBYE is the gossip-mode departure signal only: libzyre
+                # removes a peer on GOODBYE when self->gossip is set and ignores
+                # it in beacon mode (zyre_node.c recv_peer), where the port-0
+                # beacon is what announces the departure.
                 with contextlib.suppress(Exception):
-                    peer.send(goodbye)
-        for group in list(self._own_groups):
-            with contextlib.suppress(Exception):
-                await self._leave_group(group)
+                    await self._gossip_shutdown()
+                for peer in list(self._peers.values()):
+                    with contextlib.suppress(Exception):
+                        peer.send_cmd(GOODBYE)
+            for group in list(self._own_groups):
+                with contextlib.suppress(Exception):
+                    await self._leave_group(group)
         for peer in list(self._peers.values()):
             peer.disconnect()
         self._peers.clear()
@@ -763,15 +950,24 @@ class ZreNode:
             if sock:
                 with contextlib.suppress(Exception):
                     sock.close(linger=0)
-        with contextlib.suppress(Exception):
-            self._ctx.term()
+        try:
+            # destroy(linger=0) closes ANY sockets still attached to this
+            # context (for example a ZAP authenticator whose thread has not
+            # stopped yet) and then terms the context — bare term() can
+            # block forever on such a straggler (that hang is what froze
+            # pytest inside Context.__del__ before this fix).
+            self._ctx.destroy(linger=0)
+        except Exception as exc:
+            # Teardown stays best-effort, but it is never silent: a
+            # suppressed destroy would leave the context untermed.
+            self._log("stop: context destroy suppressed: %s", exc)
 
     async def join(self, group: str | bytes) -> None:
-        group_bytes = group.encode() if isinstance(group, str) else group
+        group_bytes = _wire_string("group", group)
         await self._api_queue.put(("JOIN", group_bytes))
 
     async def leave(self, group: str | bytes) -> None:
-        group_bytes = group.encode() if isinstance(group, str) else group
+        group_bytes = _wire_string("group", group)
         await self._api_queue.put(("LEAVE", group_bytes))
 
     async def whisper(self, peer_hex: str | bytes, payload: str | bytes) -> None:
@@ -780,7 +976,7 @@ class ZreNode:
         await self._api_queue.put(("WHISPER", peer_id, raw_payload))
 
     async def shout(self, group: str | bytes, payload: str | bytes) -> None:
-        group_bytes = group.encode() if isinstance(group, str) else group
+        group_bytes = _wire_string("group", group)
         raw_payload = payload.encode() if isinstance(payload, str) else payload
         await self._api_queue.put(("SHOUT", group_bytes, raw_payload))
 
@@ -901,9 +1097,8 @@ class ZreNode:
         return None
 
     def set_header(self, key: str | bytes, value: str | bytes) -> None:
-        self._headers[(key if isinstance(key, bytes) else key.encode())] = (
-            value if isinstance(value, bytes) else value.encode()
-        )
+        key_bytes = _wire_string("header name", key)
+        self._headers[key_bytes] = _wire_string(f"header value for {key!r}", value)
 
     def _require_group(self, group: bytes) -> Group:
         found = self._groups.get(group)
@@ -914,100 +1109,159 @@ class ZreNode:
             found.contest = True
         return found
 
-    def _next_seq(self) -> int:
-        seq = self._seq
-        self._seq = (self._seq + 1) & 0xFFFF
-        if self._seq == 0:
-            self._seq = 1
-        return seq
+    def _wire_id(self, uuid_hex: str) -> str:
+        """Peer id in the form libzyre puts on the wire.
+
+        libzyre compares ELECT/LEADER identities with plain strcmp() over
+        zuuid_str() output, which is UPPERCASE hex (e.g. "AB12..."). If we
+        sent lowercase, 'a' (0x61) sorts after 'A' (0x41) and every libzyre
+        node would treat our challenger as *not* superior, re-running the
+        election forever. So identities travel uppercase; they are lowercased
+        again for the public event fields and our own peer tables.
+        """
+        return uuid_hex.upper()
 
     def _election_neighbors(self, group: Group) -> list:
-        return [
-            found for found in group.peers.values() if found.connected and found.ready
-        ]
+        """Peers an election wave can travel through.
+
+        Matches zyre_group_peers(): every peer libzyre has recorded as a
+        member of the group. Counting a different set here makes
+        erec_complete()/lrec_complete() disagree with libzyre's and the
+        election never converges.
+        """
+        return [found for found in group.peers.values() if found.connected]
+
+    def _now(self) -> float:
+        try:
+            return asyncio.get_running_loop().time()
+        except RuntimeError:
+            return 0.0
 
     def _start_election(self, group_bytes: bytes) -> None:
         group = self._require_group(group_bytes)
-        if not group.contest:
+        # libzyre only runs an election for a group we are a member of
+        # (zyre_node.c guards every start with zlist_exists(own_groups, ...));
+        # contesting a group we never joined would make us a phantom
+        # candidate that libzyre peers never count.
+        if not group.contest or group_bytes not in self._own_groups:
             return
+        if group.election is not None:
+            # libzyre unconditionally throws away a running election when
+            # group membership changes (zyre_node.c recv_peer HELLO/JOIN:
+            # "Discard a running election because the number of peers
+            # change"). Restarting on top of a live election produces extra
+            # ELECT waves and a duplicate LEADER event per member.
+            group.election = None
+        now = self._now()
         group.election = {
-            "caw": self.peer_id_hex,
+            "caw": self._wire_id(self.peer_id_hex),
             "father": None,
             "erec": 0,
             "lrec": 0,
             "leader": None,
+            "started_at": now,
+            "resent_at": now,
         }
         group.leader = None
         neighbors = self._election_neighbors(group)
         if not neighbors:
-            self._finish_election(group, self.peer_id_hex)
+            self._finish_election(group, self._wire_id(self.peer_id_hex))
             return
-        header = Codec.encode_election(
-            ELECT, self._next_seq(), group_bytes, self.peer_id_hex
-        )
+        caw = self._wire_id(self.peer_id_hex).encode()
         for found in neighbors:
-            found.send(header)
+            found.send_election(ELECT, group_bytes, caw)
 
     def _handle_elect(self, peer: Peer, group_bytes: bytes, challenger: bytes) -> None:
         group = self._require_group(group_bytes)
-        challenger_hex = self._bdec(challenger)
+        challenger_id = self._wire_id(self._bdec(challenger))
         election = group.election
-        if election is None or challenger_hex < election["caw"]:
+        now = self._now()
+        if election is None or challenger_id < election["caw"]:
             election = {
-                "caw": challenger_hex,
+                "caw": challenger_id,
                 "father": peer.uuid_hex,
                 "erec": 0,
                 "lrec": 0,
                 "leader": None,
+                "started_at": now,
+                "resent_at": now,
             }
             group.election = election
-            header = Codec.encode_election(
-                ELECT, self._next_seq(), group_bytes, challenger_hex
-            )
             for found in self._election_neighbors(group):
                 if found.uuid_hex != peer.uuid_hex:
-                    found.send(header)
-        if challenger_hex != election["caw"]:
+                    found.send_election(ELECT, group_bytes, challenger_id.encode())
+        if challenger_id != election["caw"]:
             return
         election["erec"] += 1
         if election["erec"] < len(self._election_neighbors(group)):
             return
-        if election["caw"] == self.peer_id_hex:
-            header = Codec.encode_election(
-                LEADER, self._next_seq(), group_bytes, election["caw"]
-            )
+        if election["caw"] == self._wire_id(self.peer_id_hex):
             for found in self._election_neighbors(group):
-                found.send(header)
+                found.send_election(LEADER, group_bytes, election["caw"].encode())
         elif election["father"] is not None:
             father = self._peers.get(election["father"])
             if father is not None:
-                father.send(
-                    Codec.encode_election(
-                        ELECT, self._next_seq(), group_bytes, election["caw"]
-                    )
-                )
+                father.send_election(ELECT, group_bytes, election["caw"].encode())
+
+    def _maintain_elections(self, now: float) -> None:
+        """Resend a stalled election wave so mixed clusters converge.
+
+        When group membership changes mid-election, libzyre discards the
+        running wave on every member and each restarts with its own id.
+        Waves already in flight then count towards the *new* election and
+        some echoes never arrive: every member waits forever (seen with 2
+        libzyre + 1 zre peers where zre holds the smallest id). Resending
+        the current CAW every few seconds gives the stalled members the
+        echo they wait for — an ELECT for the CAW they already support
+        increments their erec — and the election terminates. Traffic is one
+        small frame per neighbor per interval, only while an election is
+        open.
+        """
+        for group_bytes, group in self._groups.items():
+            election = group.election
+            if election is None or not group.contest:
+                continue
+            if group_bytes not in self._own_groups:
+                continue
+            neighbors = self._election_neighbors(group)
+            if not neighbors:
+                self._finish_election(group, self._wire_id(self.peer_id_hex))
+                continue
+            if now - election.get("resent_at", 0.0) < 2.0:
+                continue
+            election["resent_at"] = now
+            caw = election["caw"].encode()
+            if election["caw"] == self._wire_id(self.peer_id_hex):
+                if election["erec"] >= len(neighbors):
+                    for found in neighbors:
+                        found.send_election(LEADER, group_bytes, caw)
+                else:
+                    for found in neighbors:
+                        found.send_election(ELECT, group_bytes, caw)
+            else:
+                for found in neighbors:
+                    if found.uuid_hex != election["father"]:
+                        found.send_election(ELECT, group_bytes, caw)
 
     def _handle_leader(self, peer: Peer, group_bytes: bytes, leader: bytes) -> None:
         group = self._require_group(group_bytes)
         election = group.election
         if election is None or election["caw"] is None:
             return
-        leader_hex = self._bdec(leader)
-        if leader_hex != self.peer_id_hex and election["lrec"] == 0:
-            header = Codec.encode_election(
-                LEADER, self._next_seq(), group_bytes, leader_hex
-            )
+        leader_id = self._wire_id(self._bdec(leader))
+        if leader_id != self._wire_id(self.peer_id_hex) and election["lrec"] == 0:
             for found in self._election_neighbors(group):
-                found.send(header)
+                found.send_election(LEADER, group_bytes, leader_id.encode())
         election["lrec"] += 1
-        election["leader"] = leader_hex
+        election["leader"] = leader_id
         if election["lrec"] >= len(self._election_neighbors(group)):
-            self._finish_election(group, leader_hex)
+            self._finish_election(group, leader_id)
 
-    def _finish_election(self, group: Group, leader_hex: str) -> None:
+    def _finish_election(self, group: Group, leader_id: str) -> None:
+        leader_hex = leader_id.lower()
         group.leader = leader_hex
         group.election = None
-        if leader_hex == self.peer_id_hex:
+        if leader_id == self._wire_id(self.peer_id_hex):
             leader_name = self._bdec(self.name)
         else:
             leader_peer = self._peers.get(leader_hex)
@@ -1026,14 +1280,24 @@ class ZreNode:
         if group is None or not group.contest:
             return
         neighbors = self._election_neighbors(group)
-        if group.leader is not None and group.leader not in self._peers:
+        leader = group.leader
+        if leader is not None and leader not in self._peers:
+            # The elected leader is gone: a new one must be picked.
             self._start_election(group_bytes)
         elif group.election is not None and not neighbors:
-            self._finish_election(group, self.peer_id_hex)
-        elif group.election is not None:
-            self._start_election(group_bytes)
+            # Nobody left to exchange waves with; we are the last one.
+            self._finish_election(group, self._wire_id(self.peer_id_hex))
+        elif group.election is not None and leader is not None:
+            # A leader was already announced for the current membership;
+            # re-running the wave would emit a second LEADER event.
+            group.election = None
 
     async def _gossip_require(self, uuid_hex: str, endpoint: str, now: float) -> None:
+        # zgossip announces keys as zuuid_str() — UPPERCASE hex. Our tables
+        # key peers by lowercase, and C peers accept either form (they
+        # strcmp() against their own zuuid_str, which is uppercase); without
+        # the normalization a single phone announces two peers here.
+        uuid_hex = uuid_hex.lower()
         if not self._running:
             return
         if uuid_hex == self.peer_id_hex:
@@ -1065,33 +1329,15 @@ class ZreNode:
             self._peers[uuid_hex] = peer
             self._send_hello(peer)
 
-    async def _handle_gossip_message(self, message: dict, now: float) -> None:
-        command = message.get("cmd")
-        if command == "SNAPSHOT":
-            for entry in message.get("known", []):
-                await self._gossip_require(
-                    entry.get("uuid", ""), entry.get("endpoint", ""), now
-                )
-        elif command == "DELIVER":
-            await self._gossip_require(
-                message.get("uuid", ""), message.get("endpoint", ""), now
-            )
-        elif command == "FORGET":
-            uuid_hex = message.get("uuid", "")
-            peer = self._peers.get(uuid_hex)
-            if peer is not None:
-                await self._remove_peer(peer)
-
-    async def _gossip_read_loop(self, reader: asyncio.StreamReader) -> None:
+    def _gossip_announce(self, sock: zmq.Socket) -> None:
+        """zgossip client flow on a hub link: HELLO, then PUBLISH for each
+        tuple we have (our own announcement, plus anything learned)."""
         try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
-            loop = asyncio.get_event_loop()
-        while self._running:
-            message = await read_message(reader)
-            if message is None:
-                return
-            await self._handle_gossip_message(message, loop.time())
+            sock.send(zgs_encode(ZGS_HELLO), zmq.NOBLOCK)
+            for key, (value, ttl) in self._gossip_tuples.items():
+                sock.send(zgs_encode(ZGS_PUBLISH, key, value, ttl), zmq.NOBLOCK)
+        except zmq.ZMQError as exc:
+            self._log("gossip announce failed: %s", exc)
 
     def _gossip_probe_target(self) -> tuple[str, int]:
         for target in self._gossip_connects:
@@ -1100,78 +1346,97 @@ class ZreNode:
                 return host, port
         return "8.8.8.8", 80
 
-    async def _gossip_join_hub(
-        self, target: str
-    ) -> tuple[asyncio.StreamReader, asyncio.StreamWriter] | None:
-        while self._running:
+    async def _handle_gossip_client(self, sock: zmq.Socket) -> None:
+        """Inbound ZGS.1 traffic on one of our DEALER hub links."""
+        while True:
             try:
-                hub_host, hub_port = self._split_hub_endpoint(target)
-                return await asyncio.open_connection(hub_host, hub_port)
-            except OSError as exc:
-                self._log("gossip connect retry: %s (%s)", target, exc)
-                await asyncio.sleep(0.5)
-        return None
+                body = sock.recv(zmq.NOBLOCK)
+            except zmq.Again:
+                break
+            except zmq.ZMQError:
+                break
+            try:
+                loop = asyncio.get_running_loop()
+            except RuntimeError:
+                loop = asyncio.get_event_loop()
+            now = loop.time()
+            self._gossip_last_rx[sock] = now
+            message = zgs_decode(body)
+            if message is None:
+                self._log("gossip: malformed frame from hub")
+                continue
+            command = message["command"]
+            if command == ZGS_PUBLISH:
+                key, value, ttl = message["key"], message["value"], message["ttl"]
+                stored = self._gossip_tuples.get(key)
+                if stored is None or stored[0] != value:
+                    self._gossip_tuples[key] = (value, ttl)
+                    # Delivered by the hub: dial the announced endpoint the
+                    # way zgossip's DELIVER wakes zyre_peer_require.
+                    await self._gossip_require(self._bdec(key), self._bdec(value), now)
+            elif command == ZGS_INVALID:
+                # Remote reset the session: say HELLO again and re-publish
+                # everything we have (zgossip.c remote_handler).
+                self._gossip_announce(sock)
+            # PONG: any inbound traffic counts as liveness
 
-    async def _gossip_loop(self) -> None:
-        targets: list[str] = []
-        if self._gossip_bind is not None:
-            hub_host, hub_port = self._split_hub_endpoint(self._gossip_bind)
-            try:
-                hub = GossipHub()
-                self._gossip_server = await hub.serve(hub_host, hub_port)
-            except OSError as exc:
-                self._log("gossip bind failed: %s (%s)", self._gossip_bind, exc)
-                return
-            targets.append(self._gossip_bind)
-        targets.extend(self._gossip_connects)
-        readers: list[asyncio.Task] = []
-        try:
-            for target in targets:
-                joined = await self._gossip_join_hub(target)
-                if joined is None:
-                    continue
-                reader, writer = joined
-                hub_host, hub_port = self._split_hub_endpoint(target)
-                self._gossip_links.append((reader, writer))
-                own_endpoint = self._gossip_publish_endpoint(hub_host, hub_port)
-                writer.write(encode_message({"cmd": "HELLO", "uuid": self.peer_id_hex}))
-                writer.write(
-                    encode_message(
-                        {
-                            "cmd": "PUBLISH",
-                            "uuid": self.peer_id_hex,
-                            "endpoint": own_endpoint,
-                        }
-                    )
-                )
-                await writer.drain()
-                readers.append(asyncio.ensure_future(self._gossip_read_loop(reader)))
-            if readers:
-                await asyncio.wait(readers, return_when=asyncio.FIRST_COMPLETED)
-        finally:
-            for pending in readers:
-                pending.cancel()
+    async def _gossip_redial(self, sock: zmq.Socket) -> None:
+        """Reconnect a hub link that stopped answering."""
+        target = self._gossip_targets.get(sock)
+        if target is None:
+            return
+        host, port = target
+        self._log("gossip redial %s:%s", host, port)
+        with contextlib.suppress(Exception):
+            self._inbox_poller.unregister(sock)
+        with contextlib.suppress(Exception):
+            sock.close(linger=0)
+        self._gossip_socks.remove(sock)
+        self._gossip_last_rx.pop(sock, None)
+        fresh = self._ctx.socket(zmq.DEALER)
+        fresh.setsockopt(zmq.SNDHWM, 1000)
+        fresh.setsockopt(zmq.LINGER, 0)
+        fresh.connect(f"tcp://{host}:{port}")
+        self._gossip_socks.append(fresh)
+        self._gossip_targets[fresh] = target
+        self._gossip_last_rx[fresh] = self._now()
+        self._inbox_poller.register(fresh, zmq.POLLIN)
+        self._gossip_announce(fresh)
+
+    async def _gossip_maintain(self, now: float) -> None:
+        """Heartbeat hub links and re-dial the ones that went quiet.
+
+        zgossip keeps its remotes alive via the zmq socket monitor; the
+        PING every second doubles as that liveness signal here (the hub
+        answers PONG, and any inbound frame refreshes the link).
+        """
+        if not self._gossip_socks:
+            return
+        if now >= self._gossip_next_ping:
+            self._gossip_next_ping = now + 1.0
+            for sock in list(self._gossip_socks):
+                with contextlib.suppress(zmq.ZMQError):
+                    sock.send(zgs_encode(ZGS_PING), zmq.NOBLOCK)
+        for sock in list(self._gossip_socks):
+            if now - self._gossip_last_rx.get(sock, now) > 5.0:
+                await self._gossip_redial(sock)
 
     async def _gossip_shutdown(self) -> None:
-        if self._gossip_task is not None:
-            self._gossip_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await self._gossip_task
-            self._gossip_task = None
-        for _, writer in self._gossip_links:
+        for sock in list(self._gossip_socks):
             with contextlib.suppress(Exception):
-                writer.write(
-                    encode_message({"cmd": "UNPUBLISH", "uuid": self.peer_id_hex})
-                )
-                await writer.drain()
-                writer.close()
-                await writer.wait_closed()
-        self._gossip_links = []
-        if self._gossip_server is not None:
-            self._gossip_server.close()
+                self._inbox_poller.unregister(sock)
             with contextlib.suppress(Exception):
-                await self._gossip_server.wait_closed()
-            self._gossip_server = None
+                sock.close(linger=0)
+            self._gossip_socks.remove(sock)
+        self._gossip_targets.clear()
+        self._gossip_last_rx.clear()
+        self._gossip_next_ping = 0.0
+        if self._gossip_hub is not None:
+            with contextlib.suppress(Exception):
+                self._inbox_poller.unregister(self._gossip_hub.socket)
+            self._gossip_hub.close()
+            self._gossip_hub = None
+        self._gossip_tuples.clear()
 
     async def events(self) -> AsyncIterator[dict]:
         # Drain past `self._running`: the run loop can die (e.g. a uuid
@@ -1271,8 +1536,6 @@ class ZreNode:
     async def _run_loop(
         self, loop: asyncio.AbstractEventLoop, last_reap: float, reap_interval: float
     ) -> None:
-        if self._gossip_active():
-            self._gossip_task = loop.create_task(self._gossip_loop())
         while self._running:
             now = loop.time()
 
@@ -1323,6 +1586,15 @@ class ZreNode:
                     except (BlockingIOError, OSError):
                         continue
                     self._handle_beacon(data, addr)
+                elif self._gossip_hub is not None and sock is self._gossip_hub.socket:
+                    # ZGS.1 hub traffic: accepted tuples also wake this node,
+                    # the way zgossip's DELIVER wakes the hub-hosting zyre.
+                    for key, value in self._gossip_hub.handle_socket():
+                        await self._gossip_require(
+                            self._bdec(key), self._bdec(value), now
+                        )
+                elif sock in self._gossip_socks:
+                    await self._handle_gossip_client(sock)
 
             if now - last_reap >= reap_interval:
                 await self._reap(now)
@@ -1347,46 +1619,40 @@ class ZreNode:
         if group in self._own_groups:
             return
         self._own_groups.append(group)
-        self._status += 1
+        self._status = (self._status + 1) & 0xFF
         self._require_group(group)
-        self._log("SEND JOIN seq=%s group=%s", self._seq, group)
-        hdr = Codec.encode_simple(JOIN, self._seq, group, self._status)
-        self._seq = (self._seq + 1) & 0xFFFF
-        if self._seq == 0:
-            self._seq = 1
-        for peer in self._peers.values():
-            peer.send(hdr)
-        self._start_election(group)
+        status = self._status
+        self._log("SEND JOIN group=%s", self._bdec(group))
+        for peer in list(self._peers.values()):
+            peer.send_cmd(JOIN, group, status)
+        # No election is started here, matching libzyre: its JOIN handler
+        # only sends the JOIN command (zyre_node_recv_api), and elections
+        # are kicked off by the *receiving* side when a peer's HELLO/JOIN
+        # arrives. Starting one on our own join makes us a second candidate
+        # wave, which double-counts ELECT/LEADER and produces two LEADER
+        # events for the same group. We still take part in an election the
+        # peers start, via _handle_elect.
 
     async def _leave_group(self, group: bytes) -> None:
         if group not in self._own_groups:
             return
         self._own_groups.remove(group)
-        self._status += 1
-        hdr = Codec.encode_simple(LEAVE, self._seq, group, self._status)
-        self._seq = (self._seq + 1) & 0xFFFF
-        if self._seq == 0:
-            self._seq = 1
-        for peer in self._peers.values():
-            peer.send(hdr)
+        self._status = (self._status + 1) & 0xFF
+        status = self._status
+        for peer in list(self._peers.values()):
+            peer.send_cmd(LEAVE, group, status)
 
     async def _do_whisper(self, peer_hex: bytes, payload: bytes) -> None:
         peer_id = peer_hex.decode() if isinstance(peer_hex, bytes) else peer_hex
         peer = self._peers.get(peer_id)
         if peer and peer.connected:
-            self._log("SEND WHISPER seq=%s to %s", self._seq, peer_id[:8])
-            peer.send(Codec.encode_simple(WHISPER, self._seq), [payload])
-            self._seq = (self._seq + 1) & 0xFFFF
-            if self._seq == 0:
-                self._seq = 1
+            self._log("SEND WHISPER to %s", peer_id[:8])
+            peer.send_cmd(WHISPER, more=[payload])
 
     async def _do_shout(self, group: bytes, payload: bytes) -> None:
         grp = self._groups.get(group)
         if grp:
-            grp.send(Codec.encode_simple(SHOUT, self._seq, group), [payload])
-            self._seq = (self._seq + 1) & 0xFFFF
-            if self._seq == 0:
-                self._seq = 1
+            grp.send(lambda seq: Codec.encode_simple(SHOUT, seq, group), [payload])
 
     def _interface_broadcast(self) -> str:
         """Subnet broadcast for the pinned interface (e.g. 192.168.122.255)."""
@@ -1408,29 +1674,87 @@ class ZreNode:
         finally:
             sock.close()
         addr = struct.unpack("!I", socket.inet_aton(ip))[0]
-        return socket.inet_ntoa(struct.pack("!I", addr | (~mask & 0xFFFFFFFF)))
+        # Clear the host bits before setting them: the subnet part must come
+        # from the masked address, not from whatever the host address had in
+        # those bits (OR-ing straight through yields 255.168.122.1 for
+        # 192.168.122.1/24 instead of 192.168.122.255).
+        return socket.inet_ntoa(struct.pack("!I", (addr & mask) | (~mask & 0xFFFFFFFF)))
+
+    def _local_subnet_broadcasts(self) -> list[str]:
+        """Subnet broadcast address of every usable IPv4 interface.
+
+        libzyre's zbeacon resolves one interface and sends to that
+        interface's subnet broadcast (zbeacon logs e.g. broadcast=
+        192.168.122.255). A limited 255.255.255.255 datagram is *routed*
+        by the kernel, so on a multi-homed host it leaves through the
+        default route — a peer's LAN that is not the default route never
+        sees it. Targeting each local subnet explicitly is what makes
+        discovery work on those hosts.
+        """
+        found: list[str] = []
+        try:
+            with open("/proc/net/route") as route_file:
+                lines = route_file.readlines()[1:]
+        except OSError:
+            return found
+        for line in lines:
+            # Iface Destination Gateway Flags RefCnt Use Metric Mask ...
+            fields = line.split()
+            if len(fields) < 8:
+                continue
+            iface, destination, mask = fields[0], fields[1], fields[7]
+            if iface == "lo" or destination == "00000000":
+                # default route: covered by the limited broadcast below
+                continue
+            if int(mask, 16) == 0:
+                continue
+            try:
+                ip = self._resolve_interface_ip(iface)
+                if not ip or ip.startswith("127."):
+                    continue
+                addr = struct.unpack("!I", socket.inet_aton(ip))[0]
+                # /proc/net/route prints Destination/Mask as hex of the
+                # host-order 32-bit value, so on little-endian hosts the
+                # bytes are reversed vs network order: 00FFFFFF on the wire
+                # is 255.255.255.0 (/24), not 0.255.255.255. Reverse before
+                # decoding. struct.unpack("!I", bytes.fromhex(mask)) without
+                # the reverse yields e.g. 255.168.122.1 for 192.168.122.1/24
+                # instead of 192.168.122.255.
+                netmask = struct.unpack("!I", bytes.fromhex(mask)[::-1])[0]
+                # Clear the host bits before setting them: the subnet part
+                # must come from the masked address (OR-ing straight through
+                # keeps host bits from the interface address).
+                broadcast = socket.inet_ntoa(
+                    struct.pack("!I", (addr & netmask) | (~netmask & 0xFFFFFFFF))
+                )
+            except (OSError, ValueError):
+                continue
+            if broadcast not in found:
+                found.append(broadcast)
+        return found
 
     def _build_send_sock(self) -> None:
         old, self._send_sock = self._send_sock, None
         with contextlib.suppress(Exception):
             if old is not None:
                 old.close()
-        self._send_targets = [
-            ("255.255.255.255", self._beacon_port),
-            ("127.255.255.255", self._beacon_port),
-            ("127.0.0.1", self._beacon_port),
-        ]
+        port = self._beacon_port
+        targets = [(addr, port) for addr in self._local_subnet_broadcasts()]
+        targets.append(("255.255.255.255", port))
+        # Loopback targets keep same-host clusters (and the test suite)
+        # working without touching the wire for peers.
+        targets.append(("127.0.0.1", port))
+        self._send_targets = targets
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
         bind_ip = self._resolve_interface_ip()
         if bind_ip:
             sock.bind((bind_ip, 0))
+            # A pinned interface means a single, deliberate destination.
             subnet = self._interface_broadcast()
-            if subnet:
-                self._send_targets = [
-                    (subnet, self._beacon_port),
-                    ("127.0.0.1", self._beacon_port),
-                ]
+            self._send_targets = (
+                [(subnet, port), ("127.0.0.1", port)] if subnet else targets
+            )
         self._send_sock = sock
 
     async def _send_beacon(self, port: int | None = None) -> None:
@@ -1455,10 +1779,23 @@ class ZreNode:
     def _handle_beacon(self, data: bytes, addr: tuple) -> None:
         if not self._running:
             return
-        if len(data) not in (BEACON_SIZE, BEACON_SIZE_V3) or data[:3] != b"ZRE":
+        if data[:3] != b"ZRE":
             return
         version = data[3]
-        if self._curve_secret is not None and version != 0x03:
+        expected = (
+            BEACON_SIZE_V3
+            if version == BEACON_VERSION_V3
+            else BEACON_SIZE
+            if version == BEACON_VERSION_V1
+            else None
+        )
+        if expected is None or len(data) != expected:
+            return
+        # Beacons are versioned per security mode; libzyre drops any
+        # beacon whose version differs from its own. Accepting only our own
+        # keeps a Curve node from dialling a peer it cannot authenticate
+        # and vice versa.
+        if version != self._beacon_version:
             return
         remote_uuid = data[4:20]
         remote_port = struct.unpack("!H", data[20:22])[0]
@@ -1475,9 +1812,11 @@ class ZreNode:
                 )
             return
         rhex = remote_uuid.hex()
-        if version == 0x03 and len(data) >= BEACON_SIZE_V3:
-            self._peer_server_keys[rhex] = bytes(data[22:54])
-            self._peer_server_keys[f"{addr[0]}:{remote_port}"] = bytes(data[22:54])
+        if version == BEACON_VERSION_V3 and len(data) == BEACON_SIZE_V3:
+            self._peer_server_keys[rhex] = bytes(data[22:BEACON_SIZE_V3])
+            self._peer_server_keys[f"{addr[0]}:{remote_port}"] = bytes(
+                data[22:BEACON_SIZE_V3]
+            )
         try:
             loop = asyncio.get_running_loop()
         except RuntimeError:
@@ -1539,29 +1878,35 @@ class ZreNode:
             sock.close()
 
     def _public_endpoint_for(self, peer_addr: str) -> bytes:
+        """Dial-back endpoint announced in HELLO.
+
+        Plainly `tcp://host:port`, with no `|z85-key` suffix. libzyre dials
+        the HELLO endpoint verbatim (zyre_peer_connect -> zsock_connect), so
+        a suffixed endpoint fails to connect and the peer is dropped. The
+        Curve key travels in the X-PUBLICKEY header instead, and the
+        `|key` suffix only exists on zgossip PUBLISH announcements.
+        """
         if self._advertised_endpoint:
-            base = self._advertised_endpoint
-        else:
-            base = _tcp_address(
-                self._own_address_for(peer_addr.strip("[]")), self._inbox_port
-            )
-        if self._curve_public is not None:
-            return f"{base}|{z85.encode(self._curve_public).decode()}".encode()
-        return base.encode()
+            return self._advertised_endpoint
+        return _tcp_address(
+            self._own_address_for(peer_addr.strip("[]")), self._inbox_port
+        ).encode()
 
     def _send_hello(self, peer: Peer) -> None:
-        self._log(
-            "SEND HELLO seq=1 to %s groups=%s", peer.uuid_hex[:8], self._own_groups
+        self._log("SEND HELLO to %s groups=%s", peer.uuid_hex[:8], self._own_groups)
+        # HELLO is always the first command on a fresh DEALER, so its
+        # sequence number is this peer's first one (RFC 36). Peers that
+        # answer HELLO on a connection we already greeted get a 2.
+        peer.send_encoded(
+            lambda seq: Codec.encode_hello(
+                seq,
+                self._public_endpoint_for(peer.addr),
+                self._own_groups,
+                self._status,
+                self.name,
+                self._headers,
+            )
         )
-        hdr = Codec.encode_hello(
-            1,
-            self._public_endpoint_for(peer.addr),
-            self._own_groups,
-            self._status,
-            self.name,
-            self._headers,
-        )
-        peer.send(hdr)
 
     async def _handle_peer_msg(self, frames: list) -> None:
         if not frames or len(frames) < 2:
@@ -1585,6 +1930,11 @@ class ZreNode:
         peer = self._peers.get(rhex)
 
         if cmd == HELLO:
+            # libzyre runs every inbound message through messages_lost(),
+            # and HELLO resets the counter to 1 (zyre_peer.c). Without that
+            # reset our first non-HELLO command would look like a gap.
+            if peer is not None:
+                peer.want_seq = 1
             await self._handle_hello(rhex, extra, peer)
             return
 
@@ -1672,10 +2022,7 @@ class ZreNode:
         elif cmd == GOODBYE:
             await self._remove_peer(peer)
         elif cmd == PING:
-            peer.send(Codec.encode_simple(PING_OK, self._seq))
-            self._seq = (self._seq + 1) & 0xFFFF
-            if self._seq == 0:
-                self._seq = 1
+            peer.send_cmd(PING_OK)
         elif cmd == PING_OK:
             peer.refresh(now, self._ev_timeout, self._ex_timeout)
 
@@ -1724,14 +2071,23 @@ class ZreNode:
         is_new = rhex not in self._peers
         hello_reply = False
         if is_new:
+            # A Curve peer announces its key as an X-PUBLICKEY header, the
+            # way libzyre does (zyre_node.c: zhash_update on SET PUBLICKEY,
+            # read back in recv_peer). Older/foreign peers may instead
+            # append "|z85key" to the endpoint, so keep that path too.
+            headers = extra.get("headers") or {}
+            advertised = headers.get(PUBLIC_KEY_HEADER)
+            if isinstance(advertised, bytes):
+                with contextlib.suppress(ValueError):
+                    self._peer_server_keys[rhex] = self._curve_key_raw(
+                        advertised, "public_key"
+                    )
             if "|" in ep_str:
                 ep_str, advertised_key = ep_str.split("|", 1)
-                try:
+                with contextlib.suppress(ValueError):
                     self._peer_server_keys[rhex] = self._curve_key_raw(
                         advertised_key, "public_key"
                     )
-                except ValueError:
-                    return
             try:
                 addr, port = _split_endpoint(ep_str)
                 if addr in ("0.0.0.0", "*"):
@@ -1819,10 +2175,14 @@ class ZreNode:
             self._restart_election_if_needed(group)
 
     async def _reap(self, now: float) -> None:
+        # Gossip heartbeat + dead-link re-dial come first so hub links stay
+        # healthy before peer timeouts are evaluated.
+        await self._gossip_maintain(now)
         for key, p in list(self._pending.items()):
             if p.expired_at and now > p.expired_at:
                 p.disconnect()
                 self._pending.pop(key, None)
+        self._maintain_elections(now)
         for peer in list(self._peers.values()):
             if peer.expired_at and now > peer.expired_at:
                 await self._remove_peer(peer)
@@ -1841,10 +2201,7 @@ class ZreNode:
                             "peer_name": self._pname(peer),
                         }
                     )
-                peer.send(Codec.encode_simple(PING, self._seq))
-                self._seq = (self._seq + 1) & 0xFFFF
-                if self._seq == 0:
-                    self._seq = 1
+                peer.send_cmd(PING)
                 peer.evasive_at = now + self._ev_timeout / 1000.0
 
     @staticmethod

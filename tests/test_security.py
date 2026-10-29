@@ -82,10 +82,13 @@ class TestCurve:
             first_task.cancel()
             second_task.cancel()
             await asyncio.gather(first_task, second_task, return_exceptions=True)
-            await first.stop()
-            await second.stop()
+            # Documented teardown order (LIBZYRE_INTEROP.md section 7):
+            # the ZAP authenticator owns a socket on the node context, so
+            # it must release it BEFORE the context is terminated.
             auth_first.stop()
             auth_second.stop()
+            await first.stop()
+            await second.stop()
 
     async def test_insecure_node_cannot_join_secure_mesh(self):
         first = ZreNode("sec-a")
@@ -131,10 +134,12 @@ class TestCurve:
             first_task.cancel()
             second_task.cancel()
             await asyncio.gather(first_task, second_task, return_exceptions=True)
-            await first.stop()
-            await second.stop()
+            # ZAP authenticators release their sockets before the node
+            # terminates the context (see LIBZYRE_INTEROP.md section 7).
             auth_first.stop()
             auth_second.stop()
+            await first.stop()
+            await second.stop()
 
     def test_bad_key_rejected(self):
         node = ZreNode("keys")

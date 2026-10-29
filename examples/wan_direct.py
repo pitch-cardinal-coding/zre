@@ -124,7 +124,7 @@ def main(argv=None):
     parser.add_argument(
         "name", nargs="?", default=f"wan-{uuid.uuid4().hex[:4]}", help="node name"
     )
-    parser.add_argument("--port", type=int, default=15670, help="beacon UDP port")
+    parser.add_argument("--port", type=int, default=5670, help="beacon UDP port")
     parser.add_argument("--interface", default=None, help="network interface or IP")
     parser.add_argument(
         "--listen-port", type=int, default=None, help="fixed TCP ROUTER port"

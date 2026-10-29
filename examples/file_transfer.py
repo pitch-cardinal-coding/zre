@@ -227,7 +227,7 @@ def main():
     sub = parser.add_subparsers(dest="mode", required=True)
     pr = sub.add_parser("receive", help="receive files")
     pr.add_argument("output_dir", type=Path)
-    pr.add_argument("--port", type=int, default=15670)
+    pr.add_argument("--port", type=int, default=5670)
     pr.add_argument("--interface", type=str, default=None)
     add_uuid_arg(pr)
     pr.add_argument("--verbose", action="store_true")
@@ -236,7 +236,7 @@ def main():
         "list",
         help="list live peers and their hex ids (use one as <peer_hex> in send)",
     )
-    pl.add_argument("--port", type=int, default=15670)
+    pl.add_argument("--port", type=int, default=5670)
     pl.add_argument("--interface", type=str, default=None)
     add_uuid_arg(pl)
     pl.add_argument("--verbose", action="store_true")
@@ -246,7 +246,7 @@ def main():
         "peer_id", type=parse_uuid, help="target peer hex id (or a --uuid label)"
     )
     ps.add_argument("filepath", type=Path, help="file to send (e.g. ./sample.mp4)")
-    ps.add_argument("--port", type=int, default=15670)
+    ps.add_argument("--port", type=int, default=5670)
     ps.add_argument("--interface", type=str, default=None)
     add_uuid_arg(ps)
     ps.add_argument("--verbose", action="store_true")

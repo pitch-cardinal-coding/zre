@@ -3,6 +3,8 @@
 import asyncio
 import time
 
+import zmq
+
 from zre.gossip import GossipHub
 from zre.node import ZreNode
 
@@ -28,6 +30,56 @@ async def collect(node, seconds=2.0):
             found.append(node._event_queue.get_nowait())
         await asyncio.sleep(0.05)
     return found
+
+
+async def drain_hub(hub, stop_event):
+    """Serve a standalone GossipHub from the test loop (the pyzmq hub needs
+    its ROUTER socket drained, like zgossip's zloop does)."""
+    poller = zmq.Poller()
+    poller.register(hub.socket, zmq.POLLIN)
+    while not stop_event.is_set():
+        if poller.poll(timeout=50):
+            hub.handle_socket()
+        await asyncio.sleep(0.02)
+
+
+class TestZgsCodec:
+    def test_hello_ping_pong_roundtrip(self):
+        from zre.gossip import (
+            ZGS_HELLO,
+            ZGS_PING,
+            ZGS_PONG,
+            zgs_decode,
+            zgs_encode,
+        )
+
+        hello = zgs_encode(ZGS_HELLO)
+        assert hello == b"\xaa\xa0\x01\x01"
+        assert zgs_decode(hello)["command"] == ZGS_HELLO
+        assert zgs_decode(zgs_encode(ZGS_PING))["command"] == ZGS_PING
+        assert zgs_decode(zgs_encode(ZGS_PONG))["command"] == ZGS_PONG
+
+    def test_publish_roundtrip_with_string_and_bytes(self):
+        from zre.gossip import ZGS_PUBLISH, zgs_decode, zgs_encode
+
+        frame = zgs_encode(ZGS_PUBLISH, "uuid-key", "tcp://10.0.0.1:5670|ABCD", 0)
+        message = zgs_decode(frame)
+        assert message is not None
+        assert message["command"] == ZGS_PUBLISH
+        assert message["key"] == b"uuid-key"
+        assert message["value"] == b"tcp://10.0.0.1:5670|ABCD"
+        assert message["ttl"] == 0
+
+    def test_malformed_frames_rejected(self):
+        from zre.gossip import ZGS_PUBLISH, zgs_decode, zgs_encode
+
+        assert zgs_decode(b"") is None
+        assert zgs_decode(b"\x00\x00\x01\x01") is None  # wrong signature
+        assert zgs_decode(b"\xaa\xa0\x01\x02") is None  # wrong version
+        assert zgs_decode(b"\xaa\xa0\x09\x01") is None  # unknown command
+        # PUBLISH with a truncated value must not decode
+        frame = zgs_encode(ZGS_PUBLISH, "k", "value", 0)
+        assert zgs_decode(frame[:-2]) is None
 
 
 class TestGossip:
@@ -104,9 +156,12 @@ class TestGossip:
             await second.stop()
 
     async def test_standalone_hub_serves_connect_only_nodes(self):
-        hub = GossipHub()
-        server = await hub.serve("127.0.0.1", HUB_PORT + 2)
         endpoint = f"tcp://127.0.0.1:{HUB_PORT + 2}"
+        ctx = zmq.Context()
+        hub = GossipHub(ctx)
+        hub.bind(endpoint)
+        stop_event = asyncio.Event()
+        drainer = asyncio.create_task(drain_hub(hub, stop_event))
         first = ZreNode("gos-a")
         second = ZreNode("gos-b")
         first.gossip_connect(endpoint)
@@ -131,5 +186,8 @@ class TestGossip:
             await asyncio.gather(first_task, second_task, return_exceptions=True)
             await first.stop()
             await second.stop()
-            server.close()
-            await server.wait_closed()
+            stop_event.set()
+            drainer.cancel()
+            await asyncio.gather(drainer, return_exceptions=True)
+            hub.close()
+            ctx.term()

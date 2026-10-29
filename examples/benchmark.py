@@ -19,7 +19,7 @@ from zre import ZreNode
 
 async def benchmark_discovery(
     num_nodes: int = 10,
-    port: int = 15670,
+    port: int = 5670,
     verbose: bool = False,
     interface: str | None = None,
 ):
@@ -63,7 +63,7 @@ async def benchmark_discovery(
 async def benchmark_throughput(
     num_messages: int = 1000,
     payload_size: int = 1024,
-    port: int = 15670,
+    port: int = 5670,
     interface: str | None = None,
 ):
     """Benchmark message throughput."""
@@ -136,7 +136,7 @@ async def benchmark_throughput(
 
 async def benchmark_latency(
     num_pings: int = 100,
-    port: int = 15670,
+    port: int = 5670,
     interface: str | None = None,
 ):
     """Benchmark message latency (whisper round-trip)."""
@@ -225,7 +225,7 @@ async def benchmark_latency(
         await node2.stop()
 
 
-async def benchmark_scalability(port: int = 15670, interface: str | None = None):
+async def benchmark_scalability(port: int = 5670, interface: str | None = None):
     """Test scalability with increasing node counts."""
     print("\n=== Scalability Benchmark ===")
     for num_nodes in [5, 10, 15, 20]:
@@ -251,7 +251,7 @@ def main():
     )
     parser.add_argument("--size", type=int, default=1024, help="payload size")
     parser.add_argument("--pings", type=int, default=100, help="num pings for latency")
-    parser.add_argument("--port", type=int, default=15670, help="beacon port")
+    parser.add_argument("--port", type=int, default=5670, help="beacon port")
     parser.add_argument(
         "--interface", type=str, default=None, help="pin beacons to this interface"
     )

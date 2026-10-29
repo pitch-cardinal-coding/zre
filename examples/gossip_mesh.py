@@ -7,7 +7,7 @@ announcements, and every node finds every other node through it.
 
 Hub side (hosts the rendezvous point and joins the mesh itself):
 
-    python3 examples/gossip_mesh.py hub --hub-port 15671 --port 15670
+    python3 examples/gossip_mesh.py hub --hub-port 15671 --port 5670
 
 Join side (any number of nodes, anywhere that can reach the hub):
 
@@ -113,7 +113,7 @@ def main(argv=None):
     parser.add_argument(
         "name", nargs="?", default=f"mesh-{uuid.uuid4().hex[:4]}", help="node name"
     )
-    parser.add_argument("--port", type=int, default=15670, help="beacon UDP port")
+    parser.add_argument("--port", type=int, default=5670, help="beacon UDP port")
     parser.add_argument("--interface", default=None, help="network interface or IP")
     parser.add_argument(
         "--hub-port", type=int, default=15671, help="hub TCP port (hub role)"

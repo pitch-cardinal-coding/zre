@@ -175,7 +175,7 @@ class DistributedLock:
 def main():
     parser = argparse.ArgumentParser(description="ZRE distributed lock")
     parser.add_argument("node_name", help="node name")
-    parser.add_argument("--port", type=int, default=15670)
+    parser.add_argument("--port", type=int, default=5670)
     parser.add_argument("--interface", type=str, default=None)
     add_uuid_arg(parser)
     parser.add_argument("--verbose", action="store_true")

@@ -1,8 +1,8 @@
 """Shared pytest fixtures/overrides.
 
 ZRE_TEST_PORT
-    Override the UDP beacon port used by tests (default 15670). Set this on
-    machines where another ZRE-speaking service already owns UDP 15670 —
+    Override the UDP beacon port used by tests (default 5670). Set this on
+    machines where another ZRE-speaking service already owns UDP 5670 —
     otherwise the suite discovers that service and fails cross-talk checks
     like ``test_two_node_discovery`` expecting exactly one peer.
 
@@ -17,8 +17,8 @@ import pytest
 
 from zre.node import ZreNode
 
-TEST_PORT = int(os.environ.get("ZRE_TEST_PORT", "15670"))
-_DEFAULT_PORT = 15670
+TEST_PORT = int(os.environ.get("ZRE_TEST_PORT", "5670"))
+_DEFAULT_PORT = 5670
 
 
 @pytest.fixture(autouse=True)
