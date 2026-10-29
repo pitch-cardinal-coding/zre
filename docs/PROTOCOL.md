@@ -13,8 +13,10 @@ network (including libzyre itself).
   Header              Body
 ```
 
-Sent as both `255.255.255.255` and the subnet broadcast on the pinned
-interface (plus loopback targets so same-host tests just work). A beacon
+Sent as the subnet broadcast of every local IPv4 interface (plus
+`255.255.255.255` and loopback targets so same-host tests just work).
+When an interface is pinned with `set_interface`, only that interface's
+subnet broadcast is used. A beacon
 with port `0` means "this peer is leaving" and triggers a local `EXIT`.
 
 Secure nodes (Curve configured) send 54-byte v3 beacons instead:
@@ -68,22 +70,42 @@ port-0 beacon instead).
   uuid — the node raises `UUIDCollisionError` and stops.
 - `Codec.decode` bounds-checks every field read.
 
-## Gossip hub protocol (zre-native)
+## Gossip hub protocol (ZGS.1, czmq `zgossip`-compatible)
 
 UDP-free discovery runs through a hub (`python3 -m zre.gossip`) over
-plain TCP. Frames are a 4-byte big-endian length plus a JSON object:
+ZMTP, speaking the same wire protocol as czmq's `zgossip`
+(`zgossip_msg.bnf`, "ZeroMQ Gossip Protocol"). The hub binds a ROUTER
+socket; clients connect DEALER — the ROUTER side frames are
+`[routing_id, body]`, the DEALER side sees `[body]`. A body is:
 
-- node → hub: `{"cmd": "HELLO", "uuid": ...}` (subscribe),
-  `{"cmd": "PUBLISH", "uuid": ..., "endpoint": ...}` (announce
-  `tcp://host:port`, with `|z85-pubkey` appended when Curve is on),
-  `{"cmd": "UNPUBLISH", "uuid": ...}` (leave).
-- hub → node: `{"cmd": "SNAPSHOT", "known": [{uuid, endpoint}, ...]}`
-  (current table on HELLO), `{"cmd": "DELIVER", "uuid": ..., "endpoint":
-  ...}` (new/changed tuple, fanned out to every other link),
-  `{"cmd": "FORGET", "uuid": ...}` (unpublished).
+```
+signature   0xAA 0xA0      two octets
+command     number-1        HELLO=1, PUBLISH=2, PING=3, PONG=4, INVALID=5
+version     number-1        always 1
 
-This protocol is zre-native, not czmq-`zgossip` wire compatible; the ZRE
-peer traffic it bootstraps is byte-identical RFC 36. Nodes behind the
+PUBLISH     signature %d2 version key value ttl
+key         string          one octet length + contents (globally unique)
+value       longstr         four-octet length + contents (tcp endpoint)
+ttl         number-4        msecs; 0 = never expires
+```
+
+Behaviour mirrors `zgossip.c` `server_accept()`:
+
+- client → hub: `HELLO` on connect; the hub answers with one `PUBLISH`
+  per stored tuple (snapshot), then keeps forwarding every new tuple.
+- `PUBLISH` → store, deliver to the owning application, broadcast to
+  every connected client; duplicates (same key and value) are ignored.
+- `PING` → `PONG`; any inbound traffic counts as liveness.
+- `INVALID` → the client re-sends `HELLO` (remote_handler semantics).
+- Tuples with a `ttl > 0` expire after `ttl` msecs.
+
+The published `value` is `tcp://host:port`, with `|z85-pubkey` appended
+when Curve is on — the same convention libzyre uses (`zyre_node.c`
+splits the suffix and reads the key from the announcement).
+
+The ZRE peer traffic this bootstraps is byte-identical RFC 36. Nodes
+can mix freely with czmq's `zgossip` on one hub — verified against a
+libzyre 2.0.1 peer on Android (`zyre_gossip_connect`). Nodes behind the
 same hub should pin `--interface` (or set an advertised endpoint) on
 multi-homed/VPN hosts so the published address is reachable — probing
 picks the default-route IP otherwise.

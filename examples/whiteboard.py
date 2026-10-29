@@ -6,8 +6,8 @@ Each peer SHOUTs JSON stroke {x,y,color,peer}. All peers print strokes.
 Covers Scenarios: real-time collaboration, Ar/Vis.
 
 Usage:
-  python3 examples/whiteboard.py alice --port 15670
-  python3 examples/whiteboard.py bob --port 15670
+  python3 examples/whiteboard.py alice --port 5670
+  python3 examples/whiteboard.py bob --port 5670
 """
 
 import argparse
@@ -145,7 +145,7 @@ async def run_board(
 def main():
     parser = argparse.ArgumentParser(description="ZRE whiteboard")
     parser.add_argument("name", help="peer name")
-    parser.add_argument("--port", type=int, default=15670)
+    parser.add_argument("--port", type=int, default=5670)
     parser.add_argument("--interface", type=str, default=None)
     add_uuid_arg(parser)
     parser.add_argument("--verbose", action="store_true")

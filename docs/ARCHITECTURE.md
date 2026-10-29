@@ -10,7 +10,7 @@
 │  │  UDP     │  │  ROUTER  │  │  API     │                  │
 │  │  Beacon  │  │  Socket  │  │  Queue   │                  │
 │  │  (port   │  │  (TCP    │  │  (join/  │                  │
-│  │  15670)  │  │  socket) │  │  leave)  │                  │
+│  │  5670)  │  │  socket) │  │  leave)  │                  │
 │  └────┬─────┘  └────┬─────┘  └────┬─────┘                  │
 │       │             │             │                         │
 │       ▼             ▼             ▼                         │
@@ -45,13 +45,16 @@
   `UUIDCollisionError` out of `run()`; the node tears its sockets down
   without sending the goodbye beacon (that would announce the *other*
   node's departure to its peers).
-- **Gossip mode** — `gossip_bind()` hosts a `GossipHub` in-process and
-  `gossip_connect()` dials one; while either is set, the UDP beacon
-  socket is never created. A `_gossip_loop` task (same event loop)
-  PUBLISHes our endpoint, retries hub connects until one answers, and
-  feeds `DELIVER`/`SNAPSHOT` tuples into the normal require-peer path,
-  so gossip and beacon peers end up in the same tables. Departures send
-  `GOODBYE` on ZRE links plus hub `UNPUBLISH`.
+- **Gossip mode** — `gossip_bind()` hosts a ZGS.1 `GossipHub` in-process
+  and `gossip_connect()` dials one; while either is set, the UDP beacon
+  socket is never created. All gossip traffic rides the same zmq.Poller
+  as the inbox (a bound ROUTER hub plus DEALER hub links — the shape of
+  zyre's zgossip delegate): HELLO + PUBLISH tuples on every hub link,
+  periodic PING heartbeats with a dead-link redial, and accepted tuples
+  fed into the normal require-peer path, so gossip and beacon peers end
+  up in the same tables. Departures send `GOODBYE` on the ZRE links;
+  ZGS.1 has no forget command on the wire, so departures are simply
+  rediscovery waiting for expiry.
 - **Elections** — per-`Group` contest flag + `{caw, father, erec, lrec,
   leader}` record; triggers on self/peer JOIN, HELLO-carried groups,
   LEAVE, peer expiry/removal, and goodbye. Lowest id wins; supporters

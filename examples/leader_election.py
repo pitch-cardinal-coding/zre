@@ -7,8 +7,8 @@ winner. Kill the winner and the survivors re-elect within seconds.
 
 Run two or more nodes (any mix of hosts), same group:
 
-    python3 examples/leader_election.py alice --group WORKERS --port 15670
-    python3 examples/leader_election.py bob --group WORKERS --port 15670
+    python3 examples/leader_election.py alice --group WORKERS --port 5670
+    python3 examples/leader_election.py bob --group WORKERS --port 5670
 
 Give stable ids to make the winner predictable:
 
@@ -86,7 +86,7 @@ def main(argv=None):
     parser.add_argument(
         "name", nargs="?", default=f"voter-{uuid.uuid4().hex[:4]}", help="node name"
     )
-    parser.add_argument("--port", type=int, default=15670, help="beacon UDP port")
+    parser.add_argument("--port", type=int, default=5670, help="beacon UDP port")
     parser.add_argument("--interface", default=None, help="network interface or IP")
     add_uuid_arg(parser)
     parser.add_argument(

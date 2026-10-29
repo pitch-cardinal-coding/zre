@@ -12,7 +12,7 @@
 | Feature | Description |
 |---------|-------------|
 | **Zero-configuration** | No central servers, brokers, or admin |
-| **Peer discovery** | Automatic via UDP broadcast beacons (port 15670), direct dial via `connect_peer(host, port)` where broadcasts can't reach, or UDP-free gossip hub (`gossip_bind` / `gossip_connect`, `python3 -m zre.gossip`) |
+| **Peer discovery** | Automatic via UDP broadcast beacons (port 5670), direct dial via `connect_peer(host, port)` where broadcasts can't reach, or UDP-free gossip hub (`gossip_bind` / `gossip_connect`, `python3 -m zre.gossip`) |
 | **Group messaging** | Join/leave named groups, multicast via unicast; per-group leader elections with `LEADER` events |
 | **Transport security** | Optional CurveZMQ + ZAP (`set_zcert`, `set_zap_domain`) with v3 beacons |
 | **Direct messaging** | Whisper to individual peers |
@@ -22,6 +22,7 @@
 | **Pure Python** | Single asyncio event loop, no threads, no C extensions |
 
 Wire conformance details: [docs/PROTOCOL.md](docs/PROTOCOL.md).
+Interop with the C implementation: [docs/LIBZYRE_INTEROP.md](docs/LIBZYRE_INTEROP.md).
 
 ## Installation
 
@@ -59,7 +60,7 @@ from zre import ZreNode
 
 async def main():
     node = ZreNode("my-app")
-    node.set_port(15670)  # override beacon port to isolate clusters
+    node.set_port(5670)  # override beacon port to isolate clusters
     await node.start()
     await node.join("CHAT")
 
@@ -87,7 +88,7 @@ node = ZreNode("my-node")  # name optional (random otherwise)
 node.set_header("X-ROLE", "worker")
 
 # Configuration — all of it BEFORE start()
-node.set_port(15670)  # UDP beacon port (cluster isolation)
+node.set_port(5670)  # UDP beacon port (cluster isolation)
 node.set_interface("eth0")  # pin NIC (or an IP) on multi-homed hosts
 node.set_interval(1000)  # beacon interval, ms
 node.set_evasive_timeout(5000)  # peer quiet -> EVASIVE probes, ms
@@ -181,12 +182,12 @@ for the handshake rules (no phantom peers, duplicate-HELLO storm guard).
 ## Testing
 
 ```bash
-python3 -m pytest tests/ -v        # protocol + feature coverage (99 tests)
+python3 -m pytest tests/ -v        # protocol + feature coverage (105 tests)
 make test                          # same, via Makefile
 make ci                            # format + lint + tests
 ```
 
-On machines where another ZRE-speaking service already owns UDP 15670,
+On machines where another ZRE-speaking service already owns UDP 5670,
 isolate the suite:
 
 ```bash
@@ -220,10 +221,13 @@ make cross-smoke PEER=user@B PASSWORD=SECRET HOST_IFACE=virbr0 FIRST_ADDR=192.16
 |----------|----------|
 | [examples/README.md](examples/README.md) | Step-by-step guide to every example (start here) |
 | [docs/PROTOCOL.md](docs/PROTOCOL.md) | RFC 36 wire format, beacon/message layouts, conformance notes |
+| [docs/LIBZYRE_INTEROP.md](docs/LIBZYRE_INTEROP.md) | Building libzyre, C and Python peers, LAN/WAN/Curve how-to |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Event-loop design and internal structure |
 | [docs/SCENARIOS.md](docs/SCENARIOS.md) | Use-case catalog mapped to examples |
 | [docs/BENCHMARKS.md](docs/BENCHMARKS.md) | Performance results, receipts, methodology |
 | [docs/MONITORING.md](docs/MONITORING.md) | py-spy/memray profiling, lint/CI, tmux demos |
+| [scripts/ndk/GETTING-STARTED.md](scripts/ndk/GETTING-STARTED.md) | Fresh-environment walkthrough: Android toolchain, Curve keys, app build/run/deploy, mesh trials, leak proof |
+| [docs/SESSION-VALIDATION.md](docs/SESSION-VALIDATION.md) | Measured validation record: Python + C (JNI) zero-leak verdicts, release build, key-rotation evidence |
 
 ## License
 
@@ -238,6 +242,6 @@ and [docs/SECURITY.md](docs/SECURITY.md).
 
 ---
 
-**Status**: Production-ready — 99 tests passing, all 18
+**Status**: Production-ready — 105 tests passing, all 18
 examples verified live on two machines across subnets in both directions
 (`scripts/cross_smoke.py`, 36/36).

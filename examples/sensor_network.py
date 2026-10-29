@@ -207,7 +207,7 @@ def main():
     parser.add_argument(
         "mode", choices=["sensors", "aggregator"], help="run sensors or aggregator"
     )
-    parser.add_argument("--port", type=int, default=15670, help="beacon port")
+    parser.add_argument("--port", type=int, default=5670, help="beacon port")
     parser.add_argument("--interface", type=str, default=None)
     add_uuid_arg(parser)
     parser.add_argument("--verbose", action="store_true")

@@ -1,9 +1,10 @@
-# Include OSS/community docs in the source distribution
-include LICENSE
-include CHANGELOG.md
-include CONTRIBUTING.md
-include CODE_OF_CONDUCT.md
-include SECURITY.md
+# Include OSS/community docs in the source distribution.
+# Paths are repo-relative: the docs live under docs/, not at the root.
+include docs/LICENSE
+include docs/CHANGELOG.md
+include docs/CONTRIBUTING.md
+include docs/CODE_OF_CONDUCT.md
+include docs/SECURITY.md
 include README.md
 
 # Tests ship with the sdist so downstream packagers can run them

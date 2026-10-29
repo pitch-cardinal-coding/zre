@@ -1,0 +1,10 @@
+    <!-- Mesh discovery keys (ZRE over Curve) -->
+    <string name="mesh_header">Mesh discovery keys</string>
+    <string name="mesh_hint">Devices find each other over an encrypted channel that runs on a Curve key pair. The pair is generated off this phone — your dashboard shows both keys as text — and pasting the two 40-character keys here is the entire setup. Without a pair the discovery node refuses to run; it never falls back to unencrypted.</string>
+    <string name="mesh_pub_label">Curve public key (Z85)</string>
+    <string name="mesh_priv_label">Curve private key (Z85)</string>
+    <string name="mesh_char_count">%1$d/40</string>
+    <string name="mesh_show">show</string>
+    <string name="mesh_hide">hide</string>
+    <string name="mesh_status_ready">Key pair complete — the discovery node rebuilds with it now.</string>
+    <string name="mesh_status_wait">Paste both 40-character keys exactly as the dashboard shows them.</string>

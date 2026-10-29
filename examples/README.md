@@ -52,6 +52,7 @@ Each one wraps that idea in a different skin:
 | 16 | `gossip_mesh.py` | Discovery without beacons | hub + join |
 | 17 | `leader_election.py` | Group coordinator vote | any number of voters |
 | 18 | `benchmark.py` | Measurements | self-contained |
+| 19 | `ccalls/` | C sensors + Python app | 2 × `sensor` (C) + `app.py` |
 
 Run them in this order the first time — each one teaches the concept the
 next one uses.
@@ -79,7 +80,7 @@ python3 examples/presence.py --help
 You should see the argument list, ending with something like:
 
 ```text
---port PORT   beacon UDP port (default 15670)
+--port PORT   beacon UDP port (default 5670)
 --interface IFACE
               network interface or IP
 --verbose     enable verbose logging
@@ -98,7 +99,7 @@ If instead you get `No module named zre`, the venv is not active — run
 
 **Rule 1 — Everyone uses the same `--port`.**
 The port is the "channel" peers shout on. Two programs with different
-`--port` values will never meet. The default is 15670, but on a shared
+`--port` values will never meet. The default is 5670, but on a shared
 machine something else may already use it — pick a free one (see below)
 and give the **same** port to every terminal of a group.
 
@@ -554,7 +555,34 @@ Needs two machines/subnets to be interesting; covered below.
 
 ### 5.17 gossip_mesh.py — discovery without beacons
 
----
+For networks where UDP broadcast cannot travel (different subnets, VPNs,
+containers, cloud VPCs). One node hosts the ZGS.1 gossip hub — the same
+wire protocol czmq's `zgossip` speaks, so libzyre peers can join too —
+and every node publishes its `uuid → tcp://endpoint` tuple there. The
+hub relays tuples, peers dial each other, and all the normal events
+(`ENTER`/`JOIN`/`SHOUT`/`WHISPER`) flow as if beacons had worked. The
+hub node joins the mesh itself.
+
+Two terminals, no beacons involved:
+
+```bash
+# terminal 1 — the hub (also a mesh member)
+python3 -u examples/gossip_mesh.py hub --port 24100 --hub-port 24101
+# terminal 2 — a joiner
+python3 -u examples/gossip_mesh.py join --hub 127.0.0.1:24101 --send "hi" --wait 15
+```
+
+```text
+[joiner-xxxx] ENTER hub-node tcp://127.0.0.1:XXXXX
+[joiner-xxxx] SHOUT from hub-node: hi
+```
+
+A standalone hub with no mesh membership is also available (verified
+against a libzyre 2.0.1 peer on Android via `zyre_gossip_connect`):
+
+```bash
+python3 -m zre.gossip --port 15671
+```
 
 ## 6. Two-machine testing
 
