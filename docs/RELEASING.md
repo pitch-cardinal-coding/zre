@@ -13,7 +13,8 @@ exact commands and clicks. No step assumes prior release experience.
 | PyPI packages | What users download with `pip install zre` | `pypi.org/project/zre` |
 
 Pushing the tag is the trigger: it starts a robot (GitHub Actions) that
-tests, builds, and uploads. You approve the uploads by clicking.
+tests, builds, gates, and uploads. Stable tags publish automatically;
+nothing to click.
 
 ## Version numbers: which one is next?
 
@@ -65,21 +66,19 @@ pre-release tag publishes to **TestPyPI only**; PyPI is reserved for
 stable `vX.Y.Z` tags. A tag like `v0.3.0-rc1` fails the artifact-name
 check because the wheel is normalized to `0.3.0rc1`.
 
-## Step 3 — Approve the uploads (two clicks, twice)
+## Step 3 — Watch the automatic publish
 
 1. Open the tag's run on the **Actions** page.
-2. A yellow banner appears: press **Review deployments**.
-3. Tick **testpypi** first → **Approve and deploy**. Wait about a minute,
-   then open `https://test.pypi.org/project/zre/` and confirm your
-   number is there.
-4. Back on the same run page, press **Review deployments** again → tick
-   **pypi** → **Approve and deploy**. Confirm on
-   `https://pypi.org/project/zre/`.
-   For a pre-release tag there is no `pypi` deployment to approve —
-   TestPyPI is the whole release.
+2. Wait for the green mark (about 3–5 minutes). A stable tag publishes
+   to TestPyPI and PyPI in the same run; a pre-release tag stops at
+   TestPyPI.
+3. Confirm `https://test.pypi.org/project/zre/` and
+   `https://pypi.org/project/zre/` show the new number.
 
-Always approve TestPyPI first: it is the rehearsal. If it looks wrong,
-stop there and fix forward instead of shipping it to real PyPI.
+The `pypi` and `testpypi` environments are configured without required
+reviewers so a stable tag release is unattended. To restore a manual
+gate, add required reviewers under Settings → Environments for both
+environments; the workflow does not change.
 
 ## Step 4 — Create the GitHub Release page
 
@@ -105,7 +104,8 @@ the sdist.
 
 The robot uploads with no passwords: PyPI trusts GitHub directly. If a
 publish job fails talking about OIDC or permissions, the trust link is
-missing — add it once per index:
+missing — add it once per index. The environments have no required
+reviewers; adding reviewers re-introduces the manual approval gate.
 
 - PyPI: project page → **Publishing** → owner `pitch-cardinal-coding`,
   repo `zre`, workflow `release.yml`, environment `pypi`.
