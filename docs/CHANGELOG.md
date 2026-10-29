@@ -12,6 +12,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Stable tag pushes publish to TestPyPI and PyPI without a manual
   environment approval; pre-release tags still stop at TestPyPI. Add
   required reviewers to the environments to restore the gate.
+- The `protect-release-tags` ruleset now restricts `v*` tag creation to
+  repository admins (deletion and force-updates remain blocked).
 
 ## [0.3.0] - 2026-10-29
 

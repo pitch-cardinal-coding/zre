@@ -58,6 +58,11 @@ The workflow refuses a tag whose commit is **not on `main`**, so always
 sync `main` first. It also refuses a tag that does not match the built
 artifact version, and (for PyPI) a version that already exists.
 
+Creating a `v*` tag is restricted to repository **admins** by the
+`protect-release-tags` ruleset (deletion and force-updates are blocked
+too; admins bypass). A non-admin maintainer must ask an admin to tag,
+or an admin can add that person as a bypass actor on the ruleset.
+
 ### Pre-releases
 
 Use a PEP 440 normalized pre-release version in `__version__` and the
@@ -110,6 +115,10 @@ reviewers; adding reviewers re-introduces the manual approval gate.
 - PyPI: project page → **Publishing** → owner `pitch-cardinal-coding`,
   repo `zre`, workflow `release.yml`, environment `pypi`.
 - TestPyPI: same, environment `testpypi`.
+- Keep both environments free of required reviewers for unattended
+  releases (adding reviewers restores the manual approval gate).
+- Keep the `protect-release-tags` ruleset active: it blocks `v*` tag
+  creation for non-admins and blocks deletion/force-updates for all.
 
 ## If something goes wrong
 
