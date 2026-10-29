@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Stable tag pushes publish to TestPyPI and PyPI without a manual
+  environment approval; pre-release tags still stop at TestPyPI. Add
+  required reviewers to the environments to restore the gate.
+
 ## [0.3.0] - 2026-10-29
 
 ### Added

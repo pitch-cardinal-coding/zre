@@ -73,10 +73,10 @@ no API tokens involved:
    test → build → gate → publish pipeline. The gate requires the tagged
    commit to be on `main`; pre-release tags (`v0.3.0rc1`) publish to
    TestPyPI only.
-4. Approve the publish when the workflow pauses at the `testpypi` and
-   (stable tags only) `pypi` environment gates (Actions → the run →
-   *Review deployments* → *Approve and deploy*). Releases do not upload
-   until a maintainer approves.
+4. Watch the run to completion. A stable tag publishes to TestPyPI and
+   PyPI automatically; a pre-release tag stops at TestPyPI. The
+   environments have no required reviewers; add reviewers under
+   Settings → Environments to restore a manual gate.
 
 The workflow tests on Python 3.10/3.12/3.14, builds the sdist + wheel,
 runs `twine check`, smoke-imports the wheel, then uploads to both
