@@ -164,3 +164,6 @@ Thumbs.db
 
 # uv (not used by the project; lockfiles are for apps, not libraries)
 uv.lock
+scripts/ndk/args.txt
+scripts/ndk/lab.env
+scripts/ndk/*.priv
