@@ -44,7 +44,7 @@ jobs:
         python: ["3.10", "3.12", "3.14"]
     env:
       # Isolate the suite's UDP beacon port: runners and containers can
-      # host other ZRE-speaking services on the 15670 default, which the
+      # host other ZRE-speaking services on the 5670 default, which the
       # tests would otherwise discover as extra peers and fail cross-talk
       # checks (tests/conftest.py maps the default to this port).
       ZRE_TEST_PORT: 24190
@@ -87,10 +87,35 @@ jobs:
           path: dist/
           if-no-files-found: error
 
+  gate:
+    name: release gate (tag provenance + channel)
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    outputs:
+      stable: ${{ steps.channel.outputs.stable }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - name: Tag must point at a commit on main
+        run: |
+          git fetch --no-tags origin main
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/main
+      - name: Classify the release channel
+        id: channel
+        run: |
+          if [[ "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "stable=true" >> "$GITHUB_OUTPUT"
+            echo "stable release: TestPyPI + PyPI"
+          else
+            echo "stable=false" >> "$GITHUB_OUTPUT"
+            echo "pre-release: TestPyPI only"
+          fi
+
   publish-pypi:
     name: publish to PyPI
-    if: startsWith(github.ref, 'refs/tags/v')
-    needs: [test, build]
+    if: needs.gate.outputs.stable == 'true'
+    needs: [test, build, gate]
     runs-on: ubuntu-latest
     environment:
       name: pypi
@@ -107,13 +132,29 @@ jobs:
           TAG="${GITHUB_REF_NAME#v}"
           ls dist/ | grep -q -- "-${TAG}.tar.gz"
           ls dist/ | grep -q -- "-${TAG}-py3-none-any.whl"
+      - name: Version must be new on PyPI
+        env:
+          V: ${{ github.ref_name }}
+        run: |
+          python - <<'PY'
+          import os, urllib.error, urllib.request
+          v = os.environ["V"].removeprefix("v")
+          try:
+              urllib.request.urlopen(f"https://pypi.org/pypi/zre/{v}/json", timeout=15)
+          except urllib.error.HTTPError as exc:
+              if exc.code == 404:
+                  print(f"zre {v} is not on PyPI yet — OK to publish")
+                  raise SystemExit(0)
+              raise
+          raise SystemExit(f"zre {v} already exists on PyPI — bump the version")
+          PY
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
 
   publish-testpypi:
     name: publish to TestPyPI
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [test, build]
+    needs: [test, build, gate]
     runs-on: ubuntu-latest
     environment:
       name: testpypi

@@ -4,11 +4,11 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "zre"
-version = "0.2.0"
+dynamic = ["version"]
 description = "Pure Python ZRE (RFC 36) implementation for peer-to-peer discovery and messaging over ZeroMQ"
 readme = "README.md"
 license = "MIT"
-license-files = ["LICENSE"]
+license-files = ["docs/LICENSE"]
 authors = [
     {name = "Chukwudi Nwachukwu", email = "30695966+ichux@users.noreply.github.com"},
 ]
@@ -52,6 +52,10 @@ dev = [
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["zre*"]
+
+[tool.setuptools.dynamic]
+# Single source of truth: zre/__init__.py's __version__.
+version = {attr = "zre.__version__"}
 
 [tool.ruff]
 target-version = "py310"

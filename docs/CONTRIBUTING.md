@@ -21,7 +21,7 @@ pip install -e .
 ## Running tests and lint
 
 ```bash
-make test      # pytest (99 tests)
+make test      # pytest (105 tests)
 make lint      # ruff check zre tests examples
 make format    # ruff format
 make ci        # check-format + lint + test
@@ -49,6 +49,9 @@ Notes:
 
 ## Releasing (maintainers)
 
+Step-by-step, plain-language instructions live in
+[RELEASING.md](RELEASING.md) — follow that file.
+
 Releases are published by GitHub Actions (`.github/workflows/release.yml`)
 using PyPI [Trusted Publishing](https://docs.pypi.org/trusted-publishers/) —
 no API tokens involved:
@@ -61,15 +64,19 @@ no API tokens involved:
 
    Owner `pitch-cardinal-coding`, repo `zre`, workflow `release.yml`,
    environment `pypi` (or `testpypi` on TestPyPI).
-2. In a pull request, update `CHANGELOG.md` and bump `version` in
-   `pyproject.toml` (and `zre/__init__.py`). Merge it once CI is green —
+2. In a pull request, update `docs/CHANGELOG.md` and bump
+   `__version__` in `zre/__init__.py` (the single source of truth;
+   `pyproject.toml` reads it dynamically). Merge it once CI is green —
    direct pushes to `main` are blocked by branch protection.
 3. Sync `main`, then tag and push just the tag:
    `git tag v0.2.0 && git push origin v0.2.0`. The tag push triggers the
-   test → build → publish pipeline.
-4. Approve the publish when the workflow pauses at the `pypi` environment
-   gate (Actions → the run → *Review deployments* → *Approve and deploy*).
-   Releases do not upload until a maintainer approves.
+   test → build → gate → publish pipeline. The gate requires the tagged
+   commit to be on `main`; pre-release tags (`v0.3.0rc1`) publish to
+   TestPyPI only.
+4. Approve the publish when the workflow pauses at the `testpypi` and
+   (stable tags only) `pypi` environment gates (Actions → the run →
+   *Review deployments* → *Approve and deploy*). Releases do not upload
+   until a maintainer approves.
 
 The workflow tests on Python 3.10/3.12/3.14, builds the sdist + wheel,
 runs `twine check`, smoke-imports the wheel, then uploads to both
