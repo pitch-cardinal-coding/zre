@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-29
+
 ### Added
 
 - **Android app integration (plain ZRE).** The app's native node, service,
@@ -122,6 +124,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Housekeeping release: no library code changes since 0.1.1.
 
+[0.3.0]: https://github.com/pitch-cardinal-coding/zre/releases/tag/v0.3.0
 [0.2.0]: https://github.com/pitch-cardinal-coding/zre/releases/tag/v0.2.0
 [0.1.2]: https://github.com/pitch-cardinal-coding/zre/releases/tag/v0.1.2
 
